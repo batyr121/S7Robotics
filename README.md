@@ -24,6 +24,8 @@ Recommended production stack:
 - Tables: users, students, groups, payments, attendance, feedback, schedule
 - Row-level security: admins see all rows, mentors see only their groups
 
+The starter SQL schema is in `supabase/schema.sql`.
+
 ## Local Run
 
 ```bash
@@ -43,4 +45,3 @@ http://localhost:5174
 3. Connect the domain in hosting DNS settings.
 4. Add a real backend and migrate storage from `localStorage` to the database.
 5. Create the first admin account.
-
