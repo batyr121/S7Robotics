@@ -198,10 +198,10 @@ button {
   height: auto;
   display: block;
   flex: 0 0 auto;
-  padding: 7px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .auth-brand .brand-logo {
@@ -978,6 +978,12 @@ select {
   color: var(--ink);
 }
 
+.button.danger {
+  border-color: rgba(226, 75, 91, 0.24);
+  background: rgba(226, 75, 91, 0.10);
+  color: #b02c3b;
+}
+
 .button.compact {
   min-height: 32px;
   padding: 0 10px;
@@ -986,6 +992,14 @@ select {
 
 .table-wrap {
   overflow-x: auto;
+}
+
+.row-actions,
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 table {
@@ -1335,6 +1349,11 @@ td small {
   max-width: 132px;
   padding: 0 8px;
   font-size: 13px;
+}
+
+.profile-delete {
+  margin-top: 14px;
+  width: 100%;
 }
 
 .profile {

@@ -38,6 +38,9 @@ try {
         'create_lesson_check' => create_lesson_check($pdo, require_user($pdo), $input),
         'create_task' => create_task($pdo, require_user($pdo), $input),
         'update_task_status' => update_task_status($pdo, require_user($pdo), $input),
+        'delete_task' => delete_task($pdo, require_user($pdo), $input),
+        'delete_student' => delete_student($pdo, require_admin($pdo), $input),
+        'delete_user' => delete_user($pdo, require_admin($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -328,6 +331,47 @@ function update_task_status(PDO $pdo, array $user, array $input): void
     $stmt = $pdo->prepare('update tasks set status = ? where id = ?');
     $stmt->execute([$status, $taskId]);
     data_response($pdo, $user);
+}
+
+function delete_task(PDO $pdo, array $user, array $input): void
+{
+    $taskId = (int)required($input, 'id');
+    $stmt = $pdo->prepare('select * from tasks where id = ?');
+    $stmt->execute([$taskId]);
+    $task = $stmt->fetch();
+    if (!$task) fail('Задача не найдена.', 404);
+    if ($user['role'] !== 'admin' && $task['assignee'] !== $user['name'] && $task['created_by'] !== $user['name']) {
+        fail('Нет доступа к задаче.', 403);
+    }
+    $stmt = $pdo->prepare('delete from tasks where id = ?');
+    $stmt->execute([$taskId]);
+    data_response($pdo, $user);
+}
+
+function delete_student(PDO $pdo, array $admin, array $input): void
+{
+    $studentId = (int)required($input, 'id');
+    $stmt = $pdo->prepare('delete from students where id = ?');
+    $stmt->execute([$studentId]);
+    data_response($pdo, $admin);
+}
+
+function delete_user(PDO $pdo, array $admin, array $input): void
+{
+    $userId = (int)required($input, 'id');
+    if ($userId === (int)$admin['id']) {
+        fail('Нельзя удалить свой аккаунт.', 422);
+    }
+    $target = get_user_by_id($pdo, $userId);
+    if ($target['role'] === 'admin') {
+        $adminCount = (int)$pdo->query("select count(*) from users where role = 'admin'")->fetchColumn();
+        if ($adminCount <= 1) {
+            fail('Нельзя удалить последнего администратора.', 422);
+        }
+    }
+    $stmt = $pdo->prepare('delete from users where id = ?');
+    $stmt->execute([$userId]);
+    data_response($pdo, $admin);
 }
 
 function data_response(PDO $pdo, array $user): void

@@ -636,7 +636,12 @@ function renderStudents() {
                     <td>${student.mentor}</td>
                     <td>${student.lessonsLeft} занятий<small>${isAdmin() ? `оплата ${formatDate(student.nextPayment)}` : "детали у админа"}</small></td>
                     <td><span class="badge ${student.status}">${statusText[student.status]}</span></td>
-                    <td><button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button></td>
+                    <td>
+                      <div class="row-actions">
+                        <button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button>
+                        ${isAdmin() ? `<button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>` : ""}
+                      </div>
+                    </td>
                   </tr>`,
               )
               .join("") || `<tr><td colspan="7"><div class="empty">Ничего не найдено</div></td></tr>`}
@@ -843,11 +848,14 @@ function renderTasks() {
                           <p>${task.description || "Описание не добавлено"}</p>
                           <div class="task-footer">
                             <small>Ответственный: ${task.assignee || "не назначен"}</small>
-                            <select data-task-status="${task.id}">
-                              <option value="todo" ${task.status === "todo" ? "selected" : ""}>Новые</option>
-                              <option value="progress" ${task.status === "progress" ? "selected" : ""}>В работе</option>
-                              <option value="done" ${task.status === "done" ? "selected" : ""}>Готово</option>
-                            </select>
+                            <div class="task-actions">
+                              <select data-task-status="${task.id}">
+                                <option value="todo" ${task.status === "todo" ? "selected" : ""}>Новые</option>
+                                <option value="progress" ${task.status === "progress" ? "selected" : ""}>В работе</option>
+                                <option value="done" ${task.status === "done" ? "selected" : ""}>Готово</option>
+                              </select>
+                              <button class="button danger compact" data-delete-task="${task.id}" type="button">Удалить</button>
+                            </div>
                           </div>
                         </article>`,
                     )
@@ -897,6 +905,7 @@ function renderTeam() {
                   <span><strong>${user.email}</strong>email</span>
                   <span><strong>${user.role}</strong>доступ</span>
                 </div>
+                ${isAdmin() && user.id !== currentUser.id ? `<button class="button danger compact profile-delete" data-delete-user="${user.id}" type="button">Удалить аккаунт</button>` : ""}
               </article>`;
           },
         )
@@ -1021,6 +1030,15 @@ function bindViewActions() {
   });
   document.querySelectorAll("[data-open-student]").forEach((button) => {
     button.addEventListener("click", () => openStudentProfile(Number(button.dataset.openStudent)));
+  });
+  document.querySelectorAll("[data-delete-student]").forEach((button) => {
+    button.addEventListener("click", () => deleteStudent(Number(button.dataset.deleteStudent)));
+  });
+  document.querySelectorAll("[data-delete-user]").forEach((button) => {
+    button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser)));
+  });
+  document.querySelectorAll("[data-delete-task]").forEach((button) => {
+    button.addEventListener("click", () => deleteTask(Number(button.dataset.deleteTask)));
   });
   document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
@@ -1255,6 +1273,50 @@ async function updateTaskStatus(taskId, status) {
   const task = state.tasks.find((item) => Number(item.id) === Number(taskId));
   if (!task) return;
   task.status = status;
+  saveState();
+  render();
+}
+
+async function deleteTask(taskId) {
+  const task = state.tasks.find((item) => Number(item.id) === Number(taskId));
+  if (!task || !confirm(`Удалить задачу "${task.title}"?`)) return;
+  if (backendEnabled) {
+    await apiRequest("delete_task", { id: taskId });
+    await refreshData();
+    return;
+  }
+  state.tasks = state.tasks.filter((item) => Number(item.id) !== Number(taskId));
+  saveState();
+  render();
+}
+
+async function deleteStudent(studentId) {
+  if (!isAdmin()) return;
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student || !confirm(`Удалить ученика "${student.name}" и связанные данные?`)) return;
+  if (backendEnabled) {
+    await apiRequest("delete_student", { id: studentId });
+    await refreshData();
+    return;
+  }
+  state.students = state.students.filter((item) => Number(item.id) !== Number(studentId));
+  state.payments = state.payments.filter((item) => Number(item.studentId) !== Number(studentId));
+  state.attendance = state.attendance.filter((item) => Number(item.studentId) !== Number(studentId));
+  state.feedback = state.feedback.filter((item) => Number(item.studentId) !== Number(studentId));
+  saveState();
+  render();
+}
+
+async function deleteUser(userId) {
+  if (!isAdmin() || Number(userId) === Number(currentUser.id)) return;
+  const user = state.users.find((item) => Number(item.id) === Number(userId));
+  if (!user || !confirm(`Удалить аккаунт "${user.name}"?`)) return;
+  if (backendEnabled) {
+    await apiRequest("delete_user", { id: userId });
+    await refreshData();
+    return;
+  }
+  state.users = state.users.filter((item) => Number(item.id) !== Number(userId));
   saveState();
   render();
 }
