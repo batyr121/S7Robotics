@@ -357,6 +357,7 @@ function renderDashboard() {
   const present = attendance.filter((item) => item.status === "present").length;
 
   return `
+    ${dashboardLanding(students.length, active, present)}
     <div class="stats-grid">
       ${stat("Ученики", students.length, isAdmin() ? "все группы" : "мои группы")}
       ${stat("Активные", active, "учатся сейчас")}
@@ -405,6 +406,104 @@ function renderDashboard() {
       <div class="card-body attendance-grid">${scheduleCells()}</div>
     </article>
   `;
+}
+
+function dashboardLanding(totalStudents, activeStudents, visits) {
+  return `
+    <section class="landing-dashboard">
+      <div class="landing-copy">
+        <span class="landing-kicker">S7 Robotics Mangystau</span>
+        <h2>Образовательная экосистема робототехники для детей и подростков.</h2>
+        <p>Центр, где ученики собирают роботов, пишут код, готовятся к соревнованиям и получают понятную траекторию развития.</p>
+        <div class="landing-actions">
+          <button class="button primary" data-view-jump="students" type="button">Ученики</button>
+          <button class="button secondary" data-view-jump="attendance" type="button">Табель</button>
+          ${isAdmin() ? `<button class="button ghost" data-view-jump="team" type="button">Команда</button>` : ""}
+        </div>
+      </div>
+      <div class="landing-photo-stack" aria-label="Фото образовательного центра">
+        <div class="center-photo main" style="--photo:url('assets/center-1.jpg')">
+          <span>Лаборатория S7</span>
+        </div>
+        <div class="center-photo side top" style="--photo:url('assets/center-2.jpg')">
+          <span>Robotics Lab</span>
+        </div>
+        <div class="center-photo side bottom" style="--photo:url('assets/center-3.jpg')">
+          <span>Project Zone</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="landing-panels">
+      <article class="card branch-map-card">
+        <div class="card-header">
+          <h3>Карта присутствия в Мангистауской области</h3>
+          <span class="badge neutral">филиалы и архив</span>
+        </div>
+        <div class="map-layout">
+          ${mangystauMap()}
+          <div class="branch-list">
+            ${branchRow("Актау", "Головной центр", "active")}
+            ${branchRow("Жанаозен", "Бывший филиал", "archive")}
+            ${branchRow("Бейнеу", "Бывший филиал", "archive")}
+            ${branchRow("Шетпе", "Выездные занятия", "soon")}
+            ${branchRow("Форт-Шевченко", "Партнерская площадка", "neutral")}
+          </div>
+        </div>
+      </article>
+      <article class="card landing-metrics-card">
+        <div class="card-header"><h3>Операционные показатели</h3><span class="badge active">live</span></div>
+        <div class="landing-metrics">
+          ${landingMetric(totalStudents, "учеников в CRM")}
+          ${landingMetric(activeStudents, "активных")}
+          ${landingMetric(visits, "отметок посещения")}
+          ${landingMetric(uniqueGroups().length, "групп")}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function landingMetric(value, label) {
+  return `<div><strong>${value}</strong><span>${label}</span></div>`;
+}
+
+function branchRow(name, label, tone) {
+  return `
+    <div class="branch-row">
+      <span class="map-dot ${tone}"></span>
+      <div>
+        <strong>${name}</strong>
+        <small>${label}</small>
+      </div>
+    </div>`;
+}
+
+function mangystauMap() {
+  return `
+    <div class="mangystau-map" aria-label="Карта Мангистауской области">
+      <svg viewBox="0 0 520 380" role="img">
+        <path class="sea" d="M0 0h174c-34 38-47 82-37 132 11 56-12 98-58 130-35 25-56 64-64 118H0z" />
+        <path class="region" d="M168 26c63 6 106 28 130 67 29 47 70 61 125 50 50-10 84 10 92 59 8 53-20 95-77 126-61 33-130 36-206 10-71-24-117-64-138-120-17-46-5-88 35-126 19-19 32-41 39-66z" />
+        <path class="road" d="M174 238c64-25 123-39 178-42 53-3 95 4 128 22" />
+        <path class="road" d="M214 107c38 41 67 85 87 132 13 31 20 61 21 91" />
+        ${mapMarker(230, 170, "Актау", "active")}
+        ${mapMarker(302, 250, "Жанаозен", "archive")}
+        ${mapMarker(430, 190, "Бейнеу", "archive")}
+        ${mapMarker(282, 124, "Шетпе", "soon")}
+        ${mapMarker(188, 92, "Форт-Шевченко", "neutral")}
+      </svg>
+    </div>
+  `;
+}
+
+function mapMarker(x, y, label, tone) {
+  return `
+    <g class="map-marker ${tone}" transform="translate(${x} ${y})">
+      <circle r="11"></circle>
+      <circle r="4"></circle>
+      <text x="16" y="5">${label}</text>
+    </g>`;
 }
 
 function stat(label, value, hint) {

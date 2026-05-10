@@ -418,6 +418,276 @@ select {
   gap: 18px;
 }
 
+.landing-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
+  align-items: center;
+  gap: 24px;
+  min-height: 410px;
+  padding: 28px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(8, 36, 77, 0.94), rgba(21, 91, 183, 0.78)),
+    linear-gradient(180deg, #dcecff, #ffffff);
+  color: white;
+  box-shadow: var(--shadow);
+}
+
+.landing-copy {
+  max-width: 720px;
+}
+
+.landing-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #d9ecff;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.landing-copy h2 {
+  margin: 18px 0 0;
+  max-width: 780px;
+  font-size: clamp(34px, 5vw, 62px);
+  line-height: 0.98;
+}
+
+.landing-copy p {
+  max-width: 620px;
+  margin: 18px 0 0;
+  color: #d8e8ff;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.landing-photo-stack {
+  position: relative;
+  min-height: 342px;
+}
+
+.center-photo {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background-image:
+    linear-gradient(135deg, rgba(8, 36, 77, 0.18), rgba(29, 111, 232, 0.16)),
+    var(--photo),
+    linear-gradient(135deg, #dcecff, #82b8ff 48%, #f7faff);
+  background-position: center;
+  background-size: cover;
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.22);
+}
+
+.center-photo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 45%, rgba(8, 36, 77, 0.74)),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0 1px, transparent 1px 32px);
+}
+
+.center-photo span {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 1;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--blue-950);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.center-photo.main {
+  inset: 18px 88px 22px 0;
+}
+
+.center-photo.side {
+  right: 0;
+  width: 178px;
+  height: 146px;
+}
+
+.center-photo.top {
+  top: 0;
+}
+
+.center-photo.bottom {
+  bottom: 0;
+}
+
+.landing-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  gap: 14px;
+}
+
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 16px;
+  padding: 18px;
+}
+
+.mangystau-map {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, #eef7ff, #ffffff);
+  border: 1px solid var(--line);
+}
+
+.mangystau-map svg {
+  width: min(100%, 620px);
+  height: auto;
+}
+
+.sea {
+  fill: #bde4ff;
+}
+
+.region {
+  fill: #ffffff;
+  stroke: #73a9e8;
+  stroke-width: 3;
+}
+
+.road {
+  fill: none;
+  stroke: #b7c9de;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 8 9;
+}
+
+.map-marker circle:first-child {
+  fill: white;
+  stroke-width: 4;
+}
+
+.map-marker circle:last-child {
+  fill: currentColor;
+}
+
+.map-marker text {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  paint-order: stroke;
+  stroke: white;
+  stroke-width: 4px;
+}
+
+.map-marker.active,
+.map-dot.active {
+  color: var(--green);
+  stroke: var(--green);
+}
+
+.map-marker.archive,
+.map-dot.archive {
+  color: var(--red);
+  stroke: var(--red);
+}
+
+.map-marker.soon,
+.map-dot.soon {
+  color: var(--amber);
+  stroke: var(--amber);
+}
+
+.map-marker.neutral,
+.map-dot.neutral {
+  color: var(--blue-600);
+  stroke: var(--blue-600);
+}
+
+.branch-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.branch-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.map-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.branch-row strong,
+.branch-row small {
+  display: block;
+}
+
+.branch-row small {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.landing-metrics-card .card-header {
+  border-bottom: 0;
+}
+
+.landing-metrics {
+  display: grid;
+  gap: 12px;
+  padding: 0 18px 18px;
+}
+
+.landing-metrics div {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--blue-050);
+}
+
+.landing-metrics strong,
+.landing-metrics span {
+  display: block;
+}
+
+.landing-metrics strong {
+  color: var(--blue-850);
+  font-size: 32px;
+  line-height: 1;
+}
+
+.landing-metrics span {
+  margin-top: 6px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .stats-grid,
 .module-grid {
   display: grid;
