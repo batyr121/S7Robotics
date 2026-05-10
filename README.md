@@ -63,3 +63,13 @@ http://localhost:8080
 4. Make sure `api/.storage` is writable by PHP.
 5. Point `s7robotics.space` DNS to the hosting server.
 6. Open the site and create the first admin account.
+
+## Ubuntu VPS Deploy
+
+On Ubuntu 22.04 with root access:
+
+```bash
+sudo DOMAIN=s7robotics.space bash deploy/ubuntu-nginx-php.sh
+```
+
+The script installs Nginx, PHP-FPM, SQLite support, clones this repo to `/var/www/s7robotics`, and configures the domain.
