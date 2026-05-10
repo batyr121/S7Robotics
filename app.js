@@ -1,0 +1,983 @@
+const STORAGE_KEY = "s7robotics-crm-v3";
+const SESSION_KEY = "s7robotics-session-v1";
+
+const seed = {
+  users: [],
+  students: [],
+  payments: [],
+  attendance: [],
+  feedback: [],
+  schedule: [],
+};
+
+const statusText = {
+  active: "Активен",
+  trial: "Пробное",
+  pause: "Пауза",
+  paid: "Оплачен",
+  soon: "Скоро",
+  overdue: "Просрочен",
+  present: "Был",
+  absent: "Не был",
+  missed: "Нет отметки",
+};
+
+const appShell = document.querySelector(".app-shell");
+const authScreen = document.querySelector("#authScreen");
+const appView = document.querySelector("#appView");
+const pageTitle = document.querySelector("#pageTitle");
+const modalRoot = document.querySelector("#modalRoot");
+const globalSearch = document.querySelector("#globalSearch");
+const currentUserName = document.querySelector("#currentUserName");
+const currentUserRole = document.querySelector("#currentUserRole");
+const logoutButton = document.querySelector("#logoutButton");
+const authError = document.querySelector("#authError");
+
+let state = loadState();
+let currentUser = getSessionUser();
+let activeView = "dashboard";
+let searchTerm = "";
+let attendanceGroup = "all";
+
+function loadState() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return structuredClone(seed);
+  try {
+    const parsed = JSON.parse(saved);
+    return normalizeState({ ...structuredClone(seed), ...parsed });
+  } catch {
+    return structuredClone(seed);
+  }
+}
+
+function normalizeState(nextState) {
+  nextState.users = nextState.users || [];
+  nextState.students = nextState.students || [];
+  nextState.payments = nextState.payments || [];
+  nextState.feedback = nextState.feedback || [];
+  nextState.schedule = nextState.schedule || [];
+  nextState.attendance = (nextState.attendance || []).map((item, index) => ({
+    id: item.id || Date.now() + index,
+    ...item,
+    studentId: Number(item.studentId),
+  }));
+  return nextState;
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function getSessionUser() {
+  const id = Number(localStorage.getItem(SESSION_KEY));
+  if (!id) return null;
+  return state?.users?.find((user) => user.id === id) || null;
+}
+
+function setSession(user) {
+  currentUser = user;
+  localStorage.setItem(SESSION_KEY, String(user.id));
+  activeView = "dashboard";
+  renderShell();
+}
+
+function logout() {
+  localStorage.removeItem(SESSION_KEY);
+  currentUser = null;
+  renderShell();
+}
+
+function isAdmin() {
+  return currentUser?.role === "admin";
+}
+
+function canUse(view) {
+  if (!currentUser) return false;
+  if (isAdmin()) return true;
+  return ["dashboard", "students", "attendance", "feedback", "team"].includes(view);
+}
+
+function visibleStudents() {
+  if (!currentUser) return [];
+  if (isAdmin()) return state.students;
+  const groups = new Set(currentUser.groups || []);
+  return state.students.filter((student) => groups.has(student.group) || student.mentor === currentUser.name);
+}
+
+function visibleStudentIds() {
+  return new Set(visibleStudents().map((student) => Number(student.id)));
+}
+
+function visiblePayments() {
+  const ids = visibleStudentIds();
+  return state.payments.filter((payment) => ids.has(Number(payment.studentId)));
+}
+
+function visibleAttendance() {
+  const ids = visibleStudentIds();
+  return state.attendance.filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visibleFeedback() {
+  const ids = visibleStudentIds();
+  return state.feedback.filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visibleSchedule() {
+  if (isAdmin()) return state.schedule;
+  const groups = new Set(currentUser?.groups || []);
+  return state.schedule.filter((lesson) => groups.has(lesson.group) || lesson.mentor === currentUser?.name);
+}
+
+function filteredStudents() {
+  const term = searchTerm.trim().toLowerCase();
+  const students = visibleStudents();
+  if (!term) return students;
+  return students.filter((student) =>
+    [student.name, student.course, student.group, student.parent, student.phone, student.mentor]
+      .join(" ")
+      .toLowerCase()
+      .includes(term),
+  );
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("ru-KZ").format(value) + " ₸";
+}
+
+function formatDate(date) {
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(new Date(date));
+}
+
+function byId(id) {
+  return state.students.find((student) => student.id === Number(id));
+}
+
+function uniqueGroups() {
+  return [...new Set(visibleStudents().map((student) => student.group))].sort();
+}
+
+function latestFeedbackDate(studentId) {
+  return visibleFeedback()
+    .filter((note) => Number(note.studentId) === Number(studentId))
+    .map((note) => note.date)
+    .sort()
+    .at(-1);
+}
+
+function crmTasks() {
+  const students = visibleStudents();
+  const tasks = [];
+  students
+    .filter((student) => student.lessonsLeft <= 2)
+    .forEach((student) => {
+      tasks.push({
+        title: `${student.name}: осталось ${student.lessonsLeft} занятий`,
+        hint: isAdmin() ? "Проверить продление абонемента" : "Сообщить админу о продлении",
+        view: isAdmin() ? "payments" : "students",
+        tone: student.lessonsLeft === 0 ? "overdue" : "soon",
+      });
+    });
+  students
+    .filter((student) => !latestFeedbackDate(student.id))
+    .forEach((student) => {
+      tasks.push({
+        title: `${student.name}: нет фидбека`,
+        hint: "Добавить короткий комментарий после урока",
+        view: "feedback",
+        tone: "neutral",
+      });
+    });
+  if (isAdmin()) {
+    state.payments
+      .filter((payment) => payment.status === "overdue")
+      .forEach((payment) => {
+        const student = byId(payment.studentId);
+        tasks.push({
+          title: `${student?.name ?? "Ученик"}: просрочена оплата`,
+          hint: `${payment.plan} · ${formatMoney(payment.amount)}`,
+          view: "payments",
+          tone: "overdue",
+        });
+      });
+  }
+  return tasks.slice(0, 6);
+}
+
+function renderShell() {
+  if (!currentUser) {
+    authScreen.hidden = false;
+    appShell.hidden = true;
+    updateAuthMode();
+    return;
+  }
+
+  authScreen.hidden = true;
+  appShell.hidden = false;
+  currentUserName.textContent = currentUser.name;
+  currentUserRole.textContent = isAdmin() ? "Админ" : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
+  if (!canUse(activeView)) activeView = "dashboard";
+  updatePageTitle();
+  syncNavigation();
+  render();
+}
+
+function updateAuthMode() {
+  const roleSelect = document.querySelector('#registerForm select[name="role"]');
+  const groupsInput = document.querySelector('#registerForm input[name="groups"]');
+  if (!roleSelect || !groupsInput) return;
+  if (state.users.length === 0) {
+    roleSelect.value = "admin";
+    roleSelect.disabled = true;
+    groupsInput.disabled = true;
+    groupsInput.placeholder = "Первый аккаунт получает полный доступ";
+  } else {
+    roleSelect.disabled = false;
+    groupsInput.disabled = false;
+    groupsInput.placeholder = "A1, B2";
+  }
+}
+
+function syncNavigation() {
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    const allowed = canUse(item.dataset.view);
+    item.hidden = !allowed;
+    item.classList.toggle("active", item.dataset.view === activeView);
+  });
+}
+
+function setView(view) {
+  if (!canUse(view)) return;
+  activeView = view;
+  syncNavigation();
+  updatePageTitle();
+  render();
+}
+
+function updatePageTitle() {
+  pageTitle.textContent = {
+    dashboard: "Обзор",
+    students: "Ученики",
+    attendance: "Табель посещаемости",
+    payments: "Абонементы",
+    feedback: "Фидбек",
+    team: "Команда",
+  }[activeView];
+}
+
+function render() {
+  const renderers = {
+    dashboard: renderDashboard,
+    students: renderStudents,
+    attendance: renderAttendance,
+    payments: renderPayments,
+    feedback: renderFeedback,
+    team: renderTeam,
+  };
+  appView.innerHTML = renderers[activeView]();
+  bindViewActions();
+  updateToday();
+}
+
+function updateToday() {
+  document.querySelector("#todayLabel").textContent = new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+  }).format(new Date());
+  const day = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][new Date().getDay()];
+  const lessons = visibleSchedule().filter((item) => item.day === day).length;
+  document.querySelector("#todayClasses").textContent = `${lessons} занятий`;
+}
+
+function renderDashboard() {
+  const students = visibleStudents();
+  const payments = isAdmin() ? state.payments : visiblePayments();
+  const attendance = visibleAttendance();
+  const active = students.filter((student) => student.status === "active").length;
+  const due = payments.filter((payment) => payment.status !== "paid").length;
+  const revenue = payments
+    .filter((payment) => payment.status === "paid")
+    .reduce((sum, payment) => sum + payment.amount, 0);
+  const avgProgress = students.length
+    ? Math.round(students.reduce((sum, student) => sum + student.progress, 0) / students.length)
+    : 0;
+  const present = attendance.filter((item) => item.status === "present").length;
+
+  return `
+    <div class="stats-grid">
+      ${stat("Ученики", students.length, isAdmin() ? "все группы" : "мои группы")}
+      ${stat("Активные", active, "учатся сейчас")}
+      ${stat("Посещений", present, "отмечено")}
+      ${stat(isAdmin() ? "Выручка" : "Прогресс", isAdmin() ? formatMoney(revenue) : `${avgProgress}%`, isAdmin() ? `${due} оплат к контролю` : "средний по группам")}
+    </div>
+    <div class="module-grid">
+      <article class="card">
+        <div class="card-header">
+          <h3>${isAdmin() ? "Ближайшие оплаты" : "Мои ученики"}</h3>
+          <button class="button secondary" data-view-jump="${isAdmin() ? "payments" : "students"}" type="button">Открыть</button>
+        </div>
+        <div class="card-body list">
+          ${
+            isAdmin()
+              ? payments.map((payment) => paymentRow(payment)).join("")
+              : students.map((student) => studentProgressRow(student)).join("")
+          }
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Прогресс</h3><span class="badge neutral">${avgProgress}%</span></div>
+        <div class="card-body list">
+          ${students.map((student) => studentProgressRow(student)).join("") || `<div class="empty">Нет учеников</div>`}
+        </div>
+      </article>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Задачи CRM</h3><span class="badge neutral">${crmTasks().length} активных</span></div>
+      <div class="card-body list">
+        ${
+          crmTasks()
+            .map(
+              (task) => `
+                <button class="task-row" data-view-jump="${task.view}" type="button">
+                  <span class="badge ${task.tone}">${task.tone === "overdue" ? "Важно" : task.tone === "soon" ? "Скоро" : "Фидбек"}</span>
+                  <span><strong>${task.title}</strong><small>${task.hint}</small></span>
+                </button>`,
+            )
+            .join("") || `<div class="empty">Все спокойно: критичных задач нет</div>`
+        }
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-header"><h3>Расписание</h3><span class="badge neutral">${isAdmin() ? "все группы" : "мои группы"}</span></div>
+      <div class="card-body attendance-grid">${scheduleCells()}</div>
+    </article>
+  `;
+}
+
+function stat(label, value, hint) {
+  return `<article class="card stat"><span>${label}</span><strong>${value}</strong><small>${hint}</small></article>`;
+}
+
+function studentProgressRow(student) {
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${student.name}</strong>
+        <small>${student.course} · ${student.group}</small>
+      </div>
+      <div class="progress-cell">
+        <div class="progress"><span style="width:${student.progress}%"></span></div>
+        <small>${student.progress}%</small>
+      </div>
+    </div>`;
+}
+
+function renderStudents() {
+  const students = filteredStudents();
+  return `
+    <div class="toolbar">
+      <div class="filters">
+        ${isAdmin() ? `<button class="button primary" data-add-student type="button">+ Ученик</button>` : ""}
+        ${isAdmin() ? `<button class="button ghost" data-reset-demo type="button">Сброс демо</button>` : ""}
+      </div>
+      <span class="badge neutral">${students.length} записей</span>
+    </div>
+    <article class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ученик</th>
+              <th>Курс</th>
+              <th>Родитель</th>
+              <th>Ментор</th>
+              <th>Абонемент</th>
+              <th>Статус</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${students
+              .map(
+                (student) => `
+                  <tr>
+                    <td><strong>${student.name}</strong><small>${student.group} · ${student.phone}</small></td>
+                    <td>${student.course}<small>Прогресс ${student.progress}%</small></td>
+                    <td>${student.parent}</td>
+                    <td>${student.mentor}</td>
+                    <td>${student.lessonsLeft} занятий<small>${isAdmin() ? `оплата ${formatDate(student.nextPayment)}` : "детали у админа"}</small></td>
+                    <td><span class="badge ${student.status}">${statusText[student.status]}</span></td>
+                    <td><button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button></td>
+                  </tr>`,
+              )
+              .join("") || `<tr><td colspan="7"><div class="empty">Ничего не найдено</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderAttendance() {
+  const groups = uniqueGroups();
+  if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
+  const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
+  const selectedIds = new Set(students.map((student) => Number(student.id)));
+  const dates = attendanceDates(selectedIds);
+  const records = visibleAttendance();
+
+  return `
+    <div class="toolbar">
+      <div class="filters">
+        <button class="button primary" data-add-attendance type="button">+ Отметка</button>
+        <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
+        <label class="inline-filter">Группа
+          <select id="attendanceGroupFilter">
+            <option value="all">Все доступные</option>
+            ${groups.map((group) => `<option value="${group}" ${group === attendanceGroup ? "selected" : ""}>${group}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <span class="badge neutral">${isAdmin() ? "админ видит все группы" : "только мои группы"}</span>
+    </div>
+    <article class="card">
+      <div class="card-header">
+        <h3>Табель посещаемости</h3>
+        <span class="badge neutral">${students.length} учеников</span>
+      </div>
+      <div class="table-wrap">
+        <table class="attendance-table">
+          <thead>
+            <tr>
+              <th>Ученик</th>
+              <th>Группа</th>
+              ${dates.map((date) => `<th>${formatDate(date)}</th>`).join("")}
+              <th>Итого</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              students
+                .map((student) => {
+                  const rowRecords = records.filter((item) => Number(item.studentId) === Number(student.id));
+                  const presentCount = rowRecords.filter((item) => item.status === "present").length;
+                  return `
+                    <tr>
+                      <td><strong>${student.name}</strong><small>${student.course}</small></td>
+                      <td>${student.group}<small>${student.mentor}</small></td>
+                      ${dates.map((date) => attendanceCell(student.id, date, records)).join("")}
+                      <td><strong>${presentCount}/${dates.length}</strong><small>посещений</small></td>
+                    </tr>`;
+                })
+                .join("") || `<tr><td colspan="${dates.length + 3}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function attendanceDates(studentIds = visibleStudentIds()) {
+  const dates = [
+    ...new Set(
+      visibleAttendance()
+        .filter((item) => studentIds.has(Number(item.studentId)))
+        .map((item) => item.date),
+    ),
+  ].sort();
+  return dates.length ? dates : [new Date().toISOString().slice(0, 10)];
+}
+
+function attendanceCell(studentId, date, records) {
+  const record = records.find((item) => Number(item.studentId) === Number(studentId) && item.date === date);
+  if (!record) {
+    return `<td><button class="mark missed" data-toggle-attendance="${studentId}:${date}" title="Поставить был" type="button">-</button></td>`;
+  }
+  const mark = record.status === "present" ? "Б" : "Н";
+  return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${date}" title="${record.topic}" type="button">${mark}</button><small>${record.topic}</small></td>`;
+}
+
+function renderPayments() {
+  if (!isAdmin()) return `<div class="empty">Абонементы доступны только администратору.</div>`;
+  const total = state.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  return `
+    <div class="stats-grid">
+      ${stat("Начислено", formatMoney(total), "все абонементы")}
+      ${stat("Оплачено", state.payments.filter((p) => p.status === "paid").length, "закрытые счета")}
+      ${stat("Скоро оплата", state.payments.filter((p) => p.status === "soon").length, "напомнить")}
+      ${stat("Просрочено", state.payments.filter((p) => p.status === "overdue").length, "связаться")}
+    </div>
+    <article class="card">
+      <div class="card-header">
+        <h3>Абонементы и оплаты</h3>
+        <div class="filters">
+          <button class="button ghost" data-export-payments type="button">Экспорт CSV</button>
+          <button class="button primary" data-add-payment type="button">+ Оплата</button>
+        </div>
+      </div>
+      <div class="card-body list">
+        ${state.payments.map((payment) => paymentRow(payment)).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function paymentRow(payment) {
+  const student = byId(payment.studentId);
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${student?.name ?? "Удаленный ученик"}</strong>
+        <small>${payment.plan} · ${formatDate(payment.date)}</small>
+      </div>
+      <div>
+        <strong>${formatMoney(payment.amount)}</strong>
+        <span class="badge ${payment.status}">${statusText[payment.status]}</span>
+      </div>
+    </div>`;
+}
+
+function renderFeedback() {
+  const notes = visibleFeedback();
+  return `
+    <div class="toolbar">
+      <button class="button primary" data-add-feedback type="button">+ Фидбек</button>
+      <span class="badge neutral">${notes.length} заметок</span>
+    </div>
+    <div class="kanban">
+      ${filteredStudents()
+        .map((student) => {
+          const studentNotes = notes.filter((note) => note.studentId === student.id);
+          return `
+            <section class="lane">
+              <h3>${student.name}</h3>
+              <div class="list">
+                ${
+                  studentNotes
+                    .map(
+                      (note) => `
+                        <article class="feedback-note">
+                          <strong>${note.skill}</strong>
+                          <small>${note.mentor} · ${formatDate(note.date)}</small>
+                          <p>${note.text}</p>
+                        </article>`,
+                    )
+                    .join("") || `<div class="empty">Пока нет фидбека</div>`
+                }
+              </div>
+            </section>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTeam() {
+  const users = isAdmin() ? state.users : [currentUser];
+  return `
+    <div class="team-grid">
+      ${users
+        .map(
+          (user) => {
+            const count = user.role === "admin" ? state.students.length : state.students.filter((student) => user.groups.includes(student.group)).length;
+            return `
+              <article class="card profile">
+                <div class="avatar">${user.name.split(" ").map((part) => part[0]).join("")}</div>
+                <h3>${user.name}</h3>
+                <p>${user.role === "admin" ? "Администратор" : "Ментор"}</p>
+                <div class="mini-metrics">
+                  <span><strong>${user.role === "admin" ? "Все" : user.groups.length}</strong>группы</span>
+                  <span><strong>${count}</strong>учеников</span>
+                  <span><strong>${user.email}</strong>email</span>
+                  <span><strong>${user.role}</strong>доступ</span>
+                </div>
+              </article>`;
+          },
+        )
+        .join("")}
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Логика доступа</h3><span class="badge neutral">${isAdmin() ? "Админ" : "Ментор"}</span></div>
+      <div class="card-body list">
+        <div class="list-row"><strong>Админ</strong><small>Все ученики, группы, оплаты, табели, аккаунты и фидбек.</small></div>
+        <div class="list-row"><strong>Ментор</strong><small>Только свои группы, отметки посещаемости, ученики и фидбек.</small></div>
+      </div>
+    </article>
+  `;
+}
+
+function scheduleCells() {
+  const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const lessons = visibleSchedule();
+  return days
+    .map((day) => {
+      const dayLessons = lessons.filter((lesson) => lesson.day === day);
+      return `
+        <div class="day-cell">
+          <strong>${day}</strong>
+          ${
+            dayLessons.length
+              ? dayLessons.map((lesson) => `<span class="lesson-pill">${lesson.group} ${lesson.time}</span>`).join("")
+              : `<small>Выходной</small>`
+          }
+        </div>`;
+    })
+    .join("");
+}
+
+function bindViewActions() {
+  document.querySelectorAll("[data-view-jump]").forEach((button) => {
+    button.addEventListener("click", () => setView(button.dataset.viewJump));
+  });
+  document.querySelectorAll("[data-open-student]").forEach((button) => {
+    button.addEventListener("click", () => openStudentProfile(Number(button.dataset.openStudent)));
+  });
+  document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
+    button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
+  });
+  document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
+  document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
+  document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
+  document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
+  document.querySelector("[data-export-attendance]")?.addEventListener("click", exportAttendanceCsv);
+  document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
+  document.querySelector("#attendanceGroupFilter")?.addEventListener("change", (event) => {
+    attendanceGroup = event.target.value;
+    render();
+  });
+  document.querySelector("[data-reset-demo]")?.addEventListener("click", () => {
+    state = structuredClone(seed);
+    saveState();
+    localStorage.setItem(SESSION_KEY, String(seed.users[0].id));
+    currentUser = state.users[0];
+    renderShell();
+  });
+}
+
+function toggleAttendance(payload) {
+  const [studentId, date] = payload.split(":");
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const record = state.attendance.find((item) => Number(item.studentId) === Number(studentId) && item.date === date);
+  if (!record) {
+    state.attendance.unshift({
+      id: Date.now(),
+      studentId: Number(studentId),
+      date,
+      status: "present",
+      topic: "Быстрая отметка",
+    });
+  } else if (record.status === "present") {
+    record.status = "absent";
+  } else {
+    state.attendance = state.attendance.filter((item) => item.id !== record.id);
+  }
+  saveState();
+  render();
+}
+
+function openStudentProfile(studentId) {
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(studentId));
+  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(studentId));
+  const payments = isAdmin() ? state.payments.filter((item) => Number(item.studentId) === Number(studentId)) : [];
+  const present = attendance.filter((item) => item.status === "present").length;
+  openModal(
+    student.name,
+    `<div class="profile-modal">
+      <div class="profile-summary">
+        ${stat("Группа", student.group, student.course)}
+        ${stat("Посещаемость", `${present}/${attendance.length || 0}`, "по отметкам")}
+        ${stat("Прогресс", `${student.progress}%`, "текущий уровень")}
+        ${stat("Занятий", student.lessonsLeft, "осталось")}
+      </div>
+      <div class="module-grid profile-sections">
+        <section class="card">
+          <div class="card-header"><h3>Контакты</h3><span class="badge ${student.status}">${statusText[student.status]}</span></div>
+          <div class="card-body list">
+            <div class="list-row"><strong>Родитель</strong><small>${student.parent}</small></div>
+            <div class="list-row"><strong>Телефон</strong><small>${student.phone}</small></div>
+            <div class="list-row"><strong>Ментор</strong><small>${student.mentor}</small></div>
+            ${isAdmin() ? `<button class="button secondary" data-quick-payment="${student.id}" type="button">Добавить оплату</button>` : ""}
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><h3>Фидбек</h3><button class="button secondary" data-quick-feedback="${student.id}" type="button">Добавить</button></div>
+          <div class="card-body list">
+            ${
+              feedback
+                .map((note) => `<div class="feedback-note"><strong>${note.skill}</strong><small>${note.mentor} · ${formatDate(note.date)}</small><p>${note.text}</p></div>`)
+                .join("") || `<div class="empty">Пока нет заметок</div>`
+            }
+          </div>
+        </section>
+      </div>
+      ${
+        isAdmin()
+          ? `<section class="card">
+              <div class="card-header"><h3>Оплаты</h3><span class="badge neutral">${payments.length}</span></div>
+              <div class="card-body list">${payments.map((payment) => paymentRow(payment)).join("") || `<div class="empty">Нет оплат</div>`}</div>
+            </section>`
+          : ""
+      }
+    </div>`,
+  );
+  modalRoot.querySelector("[data-quick-feedback]")?.addEventListener("click", () => {
+    closeModal();
+    openFeedbackModal(student.id);
+  });
+  modalRoot.querySelector("[data-quick-payment]")?.addEventListener("click", () => {
+    closeModal();
+    openPaymentModal(student.id);
+  });
+}
+
+function openModal(title, content) {
+  modalRoot.hidden = false;
+  modalRoot.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+      <div class="modal-head">
+        <h2>${title}</h2>
+        <button class="button ghost" data-close-modal type="button">Закрыть</button>
+      </div>
+      ${content}
+    </div>
+  `;
+  modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => {
+    button.addEventListener("click", closeModal);
+  });
+}
+
+function closeModal() {
+  modalRoot.hidden = true;
+  modalRoot.innerHTML = "";
+}
+
+function openStudentModal() {
+  if (!isAdmin()) return;
+  const template = document.querySelector("#studentFormTemplate").content.cloneNode(true);
+  const wrapper = document.createElement("div");
+  wrapper.append(template);
+  openModal("Новый ученик", wrapper.innerHTML);
+  const mentorSelect = modalRoot.querySelector("#mentorSelect");
+  mentorSelect.innerHTML = state.users
+    .filter((user) => user.role === "mentor")
+    .map((user) => `<option>${user.name}</option>`)
+    .join("");
+  modalRoot.querySelector("#studentForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const student = Object.fromEntries(form.entries());
+    state.students.unshift({
+      ...student,
+      id: Date.now(),
+      lessonsLeft: Number(student.lessonsLeft),
+      progress: 10,
+      nextPayment: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10),
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openAttendanceModal() {
+  openModal(
+    "Новая отметка",
+    `<form class="modal-form" id="attendanceForm">
+      ${studentSelectField()}
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Статус<select name="status"><option value="present">Был</option><option value="absent">Не был</option></select></label>
+      <label>Тема урока<input name="topic" required placeholder="Например, моторы и датчики" /></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#attendanceForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const item = Object.fromEntries(new FormData(event.currentTarget).entries());
+    state.attendance.unshift({ ...item, id: Date.now(), studentId: Number(item.studentId) });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openPaymentModal(selectedStudentId = null) {
+  if (!isAdmin()) return;
+  openModal(
+    "Новая оплата",
+    `<form class="modal-form" id="paymentForm">
+      ${studentSelectField(state.students, selectedStudentId)}
+      <label>Абонемент<select name="plan"><option>8 занятий</option><option>12 занятий</option><option>Пробный блок</option></select></label>
+      <label>Сумма<input name="amount" type="number" required value="52000" /></label>
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Статус<select name="status"><option value="paid">Оплачен</option><option value="soon">Скоро</option><option value="overdue">Просрочен</option></select></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#paymentForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const payment = Object.fromEntries(new FormData(event.currentTarget).entries());
+    state.payments.unshift({
+      ...payment,
+      id: Date.now(),
+      studentId: Number(payment.studentId),
+      amount: Number(payment.amount),
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openFeedbackModal(selectedStudentId = null) {
+  openModal(
+    "Фидбек ученику",
+    `<form class="modal-form" id="feedbackForm">
+      ${studentSelectField(visibleStudents(), selectedStudentId)}
+      <label>Навык<input name="skill" required placeholder="Код, сборка, командная работа" /></label>
+      <label>Ментор<input name="mentor" required value="${currentUser.name}" ${isAdmin() ? "" : "readonly"} /></label>
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label style="grid-column:1/-1">Комментарий<textarea name="text" required placeholder="Что получилось, что улучшить, следующий шаг"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#feedbackForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const note = Object.fromEntries(new FormData(event.currentTarget).entries());
+    state.feedback.unshift({ ...note, id: Date.now(), studentId: Number(note.studentId) });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function studentSelectField(students = visibleStudents(), selectedStudentId = null) {
+  return `<label>Ученик<select name="studentId">${students
+    .map((student) => `<option value="${student.id}" ${Number(selectedStudentId) === Number(student.id) ? "selected" : ""}>${student.name} · ${student.group}</option>`)
+    .join("")}</select></label>`;
+}
+
+function exportAttendanceCsv() {
+  const rows = [["Ученик", "Группа", "Дата", "Статус", "Тема", "Ментор"]];
+  visibleAttendance().forEach((item) => {
+    const student = byId(item.studentId);
+    rows.push([
+      student?.name ?? "",
+      student?.group ?? "",
+      item.date,
+      statusText[item.status],
+      item.topic,
+      student?.mentor ?? "",
+    ]);
+  });
+  downloadCsv("s7-attendance.csv", rows);
+}
+
+function exportPaymentsCsv() {
+  if (!isAdmin()) return;
+  const rows = [["Ученик", "Группа", "Абонемент", "Сумма", "Дата", "Статус"]];
+  state.payments.forEach((payment) => {
+    const student = byId(payment.studentId);
+    rows.push([
+      student?.name ?? "",
+      student?.group ?? "",
+      payment.plan,
+      payment.amount,
+      payment.date,
+      statusText[payment.status],
+    ]);
+  });
+  downloadCsv("s7-payments.csv", rows);
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(csvValue).join(",")).join("\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvValue(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function showAuthError(message) {
+  authError.textContent = message;
+}
+
+document.querySelectorAll("[data-auth-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-auth-tab]").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelector("#loginForm").hidden = button.dataset.authTab !== "login";
+    document.querySelector("#registerForm").hidden = button.dataset.authTab !== "register";
+    showAuthError("");
+  });
+});
+
+document.querySelector("#loginForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const user = state.users.find(
+    (item) => item.email.toLowerCase() === form.email.toLowerCase() && item.password === form.password,
+  );
+  if (!user) {
+    showAuthError("Неверный email или пароль.");
+    return;
+  }
+  showAuthError("");
+  setSession(user);
+});
+
+document.querySelector("#registerForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (state.users.some((user) => user.email.toLowerCase() === form.email.toLowerCase())) {
+    showAuthError("Такой email уже зарегистрирован.");
+    return;
+  }
+  const firstUser = state.users.length === 0;
+  if (!firstUser && form.role === "admin") {
+    showAuthError("Нового админа можно добавить только из настоящей серверной админ-панели. Сейчас создайте ментора.");
+    return;
+  }
+  const user = {
+    id: Date.now(),
+    name: form.name,
+    email: form.email,
+    password: form.password,
+    role: firstUser ? "admin" : form.role,
+    groups: firstUser || form.role === "admin" ? [] : form.groups.split(",").map((group) => group.trim()).filter(Boolean),
+  };
+  state.users.push(user);
+  saveState();
+  showAuthError("");
+  setSession(user);
+});
+
+document.querySelectorAll(".nav-item").forEach((button) => {
+  button.addEventListener("click", () => setView(button.dataset.view));
+});
+
+globalSearch.addEventListener("input", (event) => {
+  searchTerm = event.target.value;
+  if (activeView !== "students") setView("students");
+  else render();
+});
+
+logoutButton.addEventListener("click", logout);
+
+modalRoot.addEventListener("click", (event) => {
+  if (event.target === modalRoot) closeModal();
+});
+
+saveState();
+renderShell();

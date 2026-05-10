@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>S7 Robotics CRM</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <section id="authScreen" class="auth-screen">
+      <div class="auth-card">
+        <div class="brand auth-brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span>S7</span>
+          </div>
+          <div>
+            <strong>S7 Robotics</strong>
+            <small>CRM доступ</small>
+          </div>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Вход и регистрация">
+          <button class="active" data-auth-tab="login" type="button">Вход</button>
+          <button data-auth-tab="register" type="button">Регистрация</button>
+        </div>
+        <form id="loginForm" class="auth-form">
+          <label>
+            Email
+            <input name="email" type="email" required placeholder="admin@s7.kz" />
+          </label>
+          <label>
+            Пароль
+            <input name="password" type="password" required placeholder="Ваш пароль" />
+          </label>
+          <button class="button primary" type="submit">Войти</button>
+          <p class="auth-hint">Если база пустая, откройте регистрацию и создайте первый аккаунт администратора.</p>
+        </form>
+        <form id="registerForm" class="auth-form" hidden>
+          <label>
+            Имя
+            <input name="name" required placeholder="Имя и фамилия" />
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" required placeholder="mentor@s7.kz" />
+          </label>
+          <label>
+            Пароль
+            <input name="password" type="password" required minlength="4" />
+          </label>
+          <label>
+            Роль
+            <select name="role">
+              <option value="admin">Админ</option>
+              <option value="mentor">Ментор</option>
+            </select>
+          </label>
+          <label>
+            Группы ментора
+            <input name="groups" placeholder="A1, B2" />
+          </label>
+          <button class="button primary" type="submit">Создать аккаунт</button>
+          <p class="auth-hint">Первый аккаунт станет админом. Для ментора укажите группы через запятую.</p>
+        </form>
+        <p id="authError" class="auth-error" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span>S7</span>
+          </div>
+          <div>
+            <strong>S7 Robotics</strong>
+            <small>Education CRM</small>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Основная навигация">
+          <button class="nav-item active" data-view="dashboard" type="button">
+            <span class="icon">⌁</span>
+            <span>Обзор</span>
+          </button>
+          <button class="nav-item" data-view="students" type="button">
+            <span class="icon">◉</span>
+            <span>Ученики</span>
+          </button>
+          <button class="nav-item" data-view="attendance" type="button">
+            <span class="icon">✓</span>
+            <span>Посещаемость</span>
+          </button>
+          <button class="nav-item" data-view="payments" type="button">
+            <span class="icon">₸</span>
+            <span>Абонементы</span>
+          </button>
+          <button class="nav-item" data-view="feedback" type="button">
+            <span class="icon">✦</span>
+            <span>Фидбек</span>
+          </button>
+          <button class="nav-item" data-view="team" type="button">
+            <span class="icon">◎</span>
+            <span>Команда</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-panel">
+          <p>Сегодня</p>
+          <strong id="todayLabel">10 мая</strong>
+          <span id="todayClasses">0 занятий</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Центр управления</p>
+            <h1 id="pageTitle">Обзор</h1>
+          </div>
+          <div class="topbar-actions">
+            <label class="search">
+              <span>⌕</span>
+              <input id="globalSearch" type="search" placeholder="Поиск по ученикам, группам, родителям" />
+            </label>
+            <div class="user-chip">
+              <strong id="currentUserName">Пользователь</strong>
+              <small id="currentUserRole">роль</small>
+            </div>
+            <button id="logoutButton" class="button ghost" type="button">Выйти</button>
+          </div>
+        </header>
+
+        <section class="hero-band">
+          <div>
+            <p>Операционная CRM для образовательного центра</p>
+            <h2>Ученики, оплаты, посещаемость и прогресс в одном рабочем пространстве.</h2>
+          </div>
+          <div class="robot-visual" aria-hidden="true">
+            <div class="bot-head">
+              <span></span>
+              <span></span>
+            </div>
+            <div class="bot-body">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+          </div>
+        </section>
+
+        <section id="appView" class="view"></section>
+      </main>
+    </div>
+
+    <template id="studentFormTemplate">
+      <form class="modal-form" id="studentForm">
+        <label>
+          ФИО ученика
+          <input name="name" required placeholder="Например, Аружан Садыкова" />
+        </label>
+        <label>
+          Направление
+          <select name="course">
+            <option>Robotics Starter</option>
+            <option>Arduino Lab</option>
+            <option>Python & AI</option>
+            <option>3D Modeling</option>
+            <option>Olympiad Robotics</option>
+          </select>
+        </label>
+        <label>
+          Группа
+          <input name="group" required placeholder="A1, B2, Senior" />
+        </label>
+        <label>
+          Родитель
+          <input name="parent" required placeholder="Имя родителя" />
+        </label>
+        <label>
+          Телефон
+          <input name="phone" required placeholder="+7 777 000 00 00" />
+        </label>
+        <label>
+          Ментор
+          <select name="mentor" id="mentorSelect"></select>
+        </label>
+        <label>
+          Статус
+          <select name="status">
+            <option value="active">Активен</option>
+            <option value="trial">Пробное</option>
+            <option value="pause">Пауза</option>
+          </select>
+        </label>
+        <label>
+          Осталось занятий
+          <input name="lessonsLeft" type="number" min="0" value="8" />
+        </label>
+        <div class="form-actions">
+          <button class="button ghost" data-close-modal type="button">Отмена</button>
+          <button class="button primary" type="submit">Сохранить</button>
+        </div>
+      </form>
+    </template>
+
+    <div id="modalRoot" class="modal-root" hidden></div>
+    <script src="app.js"></script>
+  </body>
+</html>
