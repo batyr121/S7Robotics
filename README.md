@@ -4,29 +4,34 @@ CRM interface for an educational robotics center.
 
 ## Current Build
 
-- Static frontend: `index.html`, `styles.css`, `app.js`
+- Frontend: `index.html`, `styles.css`, `app.js`
+- Backend: `api/index.php`
+- Database: SQLite file created automatically in `api/.storage/crm.sqlite`
 - Clean start: no demo students, payments, mentors, or attendance
 - First registered account becomes the admin
 - Admin can see all sections
 - Mentor can see only assigned groups
-- Data currently persists in browser `localStorage`
+- Public registration closes after the first admin account
+- New accounts are created only by an admin inside CRM
 
 ## Important Production Note
 
-This version is ready as a frontend prototype and can be hosted on GitHub Pages, Netlify, or Vercel.
+This version now needs PHP hosting. GitHub Pages can host only static files, so the real backend will not run there.
 
-For a real education center, connect a backend database and server-side authentication before collecting real children, parents, payment, or attendance data. Browser `localStorage` is not a shared database and is not secure for production passwords.
+The PHP backend uses server-side sessions, password hashing, and a shared SQLite database.
 
 Recommended production stack:
 
-- Frontend hosting: Vercel or Netlify
-- Database and auth: Supabase
+- Simple hosting: Nginx/Apache + PHP with PDO SQLite enabled
+- Stronger database option: Supabase/Postgres using `supabase/schema.sql`
 - Tables: users, students, groups, payments, attendance, feedback, schedule
 - Row-level security: admins see all rows, mentors see only their groups
 
 The starter SQL schema is in `supabase/schema.sql`.
 
 ## Local Run
+
+Static fallback only:
 
 ```bash
 python3 -m http.server 5174
@@ -38,10 +43,23 @@ Open:
 http://localhost:5174
 ```
 
+Backend mode requires PHP:
+
+```bash
+php -S localhost:8080
+```
+
+Open:
+
+```text
+http://localhost:8080
+```
+
 ## Deploy Checklist
 
 1. Push this folder to GitHub.
-2. Deploy the repo to hosting.
-3. Connect the domain in hosting DNS settings.
-4. Add a real backend and migrate storage from `localStorage` to the database.
-5. Create the first admin account.
+2. Upload all files to PHP hosting document root.
+3. Make sure PHP has PDO SQLite enabled.
+4. Make sure `api/.storage` is writable by PHP.
+5. Point `s7robotics.space` DNS to the hosting server.
+6. Open the site and create the first admin account.

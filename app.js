@@ -1,5 +1,7 @@
 const STORAGE_KEY = "s7robotics-crm-v3";
 const SESSION_KEY = "s7robotics-session-v1";
+const API_URL = "api/index.php";
+const TOKEN_KEY = "s7robotics-api-token";
 
 const seed = {
   users: [],
@@ -34,7 +36,8 @@ const logoutButton = document.querySelector("#logoutButton");
 const authError = document.querySelector("#authError");
 
 let state = loadState();
-let currentUser = getSessionUser();
+let currentUser = null;
+let backendEnabled = false;
 let activeView = "dashboard";
 let searchTerm = "";
 let attendanceGroup = "all";
@@ -65,13 +68,50 @@ function normalizeState(nextState) {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!backendEnabled) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
 }
 
-function getSessionUser() {
-  const id = Number(localStorage.getItem(SESSION_KEY));
-  if (!id) return null;
-  return state?.users?.find((user) => user.id === id) || null;
+async function apiRequest(action, payload = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const response = await fetch(`${API_URL}?action=${encodeURIComponent(action)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("Backend недоступен");
+  }
+  if (!response.ok) {
+    throw new Error(data.error || "Ошибка сервера");
+  }
+  backendEnabled = true;
+  return data;
+}
+
+async function refreshData() {
+  const data = await apiRequest("data");
+  currentUser = data.user;
+  state = normalizeState({ ...structuredClone(seed), ...data.state });
+  renderShell();
+}
+
+function applyAuthResponse(data) {
+  if (data.token) {
+    localStorage.setItem(TOKEN_KEY, data.token);
+  }
+  currentUser = data.user;
+  state = normalizeState({ ...structuredClone(seed), ...data.state });
+  activeView = "dashboard";
+  renderShell();
 }
 
 function setSession(user) {
@@ -82,6 +122,10 @@ function setSession(user) {
 }
 
 function logout() {
+  if (backendEnabled) {
+    apiRequest("logout").catch(() => {});
+  }
+  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(SESSION_KEY);
   currentUser = null;
   renderShell();
@@ -673,10 +717,15 @@ function bindViewActions() {
   });
 }
 
-function toggleAttendance(payload) {
+async function toggleAttendance(payload) {
   const [studentId, date] = payload.split(":");
   const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
   if (!student) return;
+  if (backendEnabled) {
+    await apiRequest("toggle_attendance", { studentId: Number(studentId), date });
+    await refreshData();
+    return;
+  }
   const record = state.attendance.find((item) => Number(item.studentId) === Number(studentId) && item.date === date);
   if (!record) {
     state.attendance.unshift({
@@ -789,7 +838,7 @@ function openUserModal() {
       </div>
     </form>`,
   );
-  modalRoot.querySelector("#userForm").addEventListener("submit", (event) => {
+  modalRoot.querySelector("#userForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = Object.fromEntries(new FormData(event.currentTarget).entries());
     const email = form.email.trim().toLowerCase();
@@ -800,14 +849,21 @@ function openUserModal() {
       );
       return;
     }
-    state.users.push({
+    const user = {
       id: Date.now(),
       name: form.name.trim(),
       email,
       password: form.password,
       role: form.role,
       groups: form.role === "admin" ? [] : form.groups.split(",").map((group) => group.trim()).filter(Boolean),
-    });
+    };
+    if (backendEnabled) {
+      await apiRequest("create_user", user);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.users.push(user);
     saveState();
     closeModal();
     render();
@@ -825,16 +881,25 @@ function openStudentModal() {
     .filter((user) => user.role === "mentor")
     .map((user) => `<option>${user.name}</option>`)
     .join("");
-  modalRoot.querySelector("#studentForm").addEventListener("submit", (event) => {
+  modalRoot.querySelector("#studentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const student = Object.fromEntries(form.entries());
-    state.students.unshift({
+    const payload = {
       ...student,
-      id: Date.now(),
       lessonsLeft: Number(student.lessonsLeft),
       progress: 10,
       nextPayment: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10),
+    };
+    if (backendEnabled) {
+      await apiRequest("create_student", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.students.unshift({
+      ...payload,
+      id: Date.now(),
     });
     saveState();
     closeModal();
@@ -853,9 +918,15 @@ function openAttendanceModal() {
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
   );
-  modalRoot.querySelector("#attendanceForm").addEventListener("submit", (event) => {
+  modalRoot.querySelector("#attendanceForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const item = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("create_attendance", item);
+      closeModal();
+      await refreshData();
+      return;
+    }
     state.attendance.unshift({ ...item, id: Date.now(), studentId: Number(item.studentId) });
     saveState();
     closeModal();
@@ -876,14 +947,23 @@ function openPaymentModal(selectedStudentId = null) {
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
   );
-  modalRoot.querySelector("#paymentForm").addEventListener("submit", (event) => {
+  modalRoot.querySelector("#paymentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const payment = Object.fromEntries(new FormData(event.currentTarget).entries());
-    state.payments.unshift({
+    const payload = {
       ...payment,
-      id: Date.now(),
       studentId: Number(payment.studentId),
       amount: Number(payment.amount),
+    };
+    if (backendEnabled) {
+      await apiRequest("create_payment", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.payments.unshift({
+      ...payload,
+      id: Date.now(),
     });
     saveState();
     closeModal();
@@ -903,9 +983,15 @@ function openFeedbackModal(selectedStudentId = null) {
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
   );
-  modalRoot.querySelector("#feedbackForm").addEventListener("submit", (event) => {
+  modalRoot.querySelector("#feedbackForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const note = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("create_feedback", note);
+      closeModal();
+      await refreshData();
+      return;
+    }
     state.feedback.unshift({ ...note, id: Date.now(), studentId: Number(note.studentId) });
     saveState();
     closeModal();
@@ -982,9 +1068,19 @@ document.querySelectorAll("[data-auth-tab]").forEach((button) => {
   });
 });
 
-document.querySelector("#loginForm").addEventListener("submit", (event) => {
+document.querySelector("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (backendEnabled) {
+    try {
+      const data = await apiRequest("login", form);
+      showAuthError("");
+      applyAuthResponse(data);
+    } catch (error) {
+      showAuthError(error.message);
+    }
+    return;
+  }
   const user = state.users.find(
     (item) => item.email.toLowerCase() === form.email.toLowerCase() && item.password === form.password,
   );
@@ -996,9 +1092,19 @@ document.querySelector("#loginForm").addEventListener("submit", (event) => {
   setSession(user);
 });
 
-document.querySelector("#registerForm").addEventListener("submit", (event) => {
+document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (backendEnabled) {
+    try {
+      const data = await apiRequest("register_first_admin", form);
+      showAuthError("");
+      applyAuthResponse(data);
+    } catch (error) {
+      showAuthError(error.message);
+    }
+    return;
+  }
   if (state.users.length > 0) {
     showAuthError("Публичная регистрация закрыта. Аккаунты создает администратор внутри CRM.");
     updateAuthMode();
@@ -1043,5 +1149,31 @@ modalRoot.addEventListener("click", (event) => {
   if (event.target === modalRoot) closeModal();
 });
 
-saveState();
-renderShell();
+async function initApp() {
+  try {
+    const status = await apiRequest("status");
+    state.users = status.hasUsers ? [{ id: 0, name: "server", role: "admin", groups: [] }] : [];
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) {
+      try {
+        await refreshData();
+        return;
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
+      }
+    }
+  } catch {
+    backendEnabled = false;
+    currentUser = getLocalSessionUser();
+  }
+  saveState();
+  renderShell();
+}
+
+function getLocalSessionUser() {
+  const id = Number(localStorage.getItem(SESSION_KEY));
+  if (!id) return null;
+  return state?.users?.find((user) => user.id === id) || null;
+}
+
+initApp();
