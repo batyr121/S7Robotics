@@ -473,64 +473,65 @@ select {
   margin-top: 24px;
 }
 
-.landing-photo-stack {
+.network-visual {
   position: relative;
   min-height: 342px;
-}
-
-.center-photo {
-  position: absolute;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
-  background-image:
-    linear-gradient(135deg, rgba(8, 36, 77, 0.18), rgba(29, 111, 232, 0.16)),
-    var(--photo),
-    linear-gradient(135deg, #dcecff, #82b8ff 48%, #f7faff);
-  background-position: center;
-  background-size: cover;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.22);
-}
-
-.center-photo::before {
-  content: "";
-  position: absolute;
-  inset: 0;
   background:
-    linear-gradient(180deg, transparent 45%, rgba(8, 36, 77, 0.74)),
-    repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0 1px, transparent 1px 32px);
+    linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 42px);
+  overflow: hidden;
 }
 
-.center-photo span {
+.network-node {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 1;
-  padding: 7px 9px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.88);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: white;
   color: var(--blue-950);
-  font-size: 12px;
   font-weight: 900;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.22);
 }
 
-.center-photo.main {
-  inset: 18px 88px 22px 0;
+.network-node.hub {
+  left: 50%;
+  top: 50%;
+  width: 98px;
+  height: 98px;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(145deg, #ffffff, #9bc9ff);
+  font-size: 28px;
 }
 
-.center-photo.side {
-  right: 0;
-  width: 178px;
-  height: 146px;
+.network-node:not(.hub) {
+  width: 70px;
+  height: 54px;
+  font-size: 15px;
 }
 
-.center-photo.top {
-  top: 0;
+.network-node.n1 { left: 8%; top: 16%; }
+.network-node.n2 { right: 10%; top: 18%; }
+.network-node.n3 { left: 13%; bottom: 13%; }
+.network-node.n4 { right: 12%; bottom: 16%; }
+
+.network-line {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 38%;
+  height: 3px;
+  transform-origin: left center;
+  background: rgba(255, 255, 255, 0.48);
 }
 
-.center-photo.bottom {
-  bottom: 0;
-}
+.network-line.l1 { transform: rotate(208deg); }
+.network-line.l2 { transform: rotate(330deg); }
+.network-line.l3 { transform: rotate(145deg); }
+.network-line.l4 { transform: rotate(32deg); }
 
 .landing-panels {
   display: grid;
@@ -686,6 +687,69 @@ select {
   margin-top: 6px;
   color: var(--muted);
   font-weight: 800;
+}
+
+.quality-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+}
+
+.mentor-level {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 18px;
+  border-radius: 8px;
+  background: var(--blue-050);
+}
+
+.mentor-level span,
+.mentor-level small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.mentor-level strong {
+  font-size: 24px;
+}
+
+.level-ring {
+  width: 118px;
+  height: 118px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, white 0 58%, transparent 59%),
+    conic-gradient(var(--green) var(--score), #dce7f5 0);
+  color: var(--blue-950);
+  font-size: 30px;
+  font-weight: 900;
+}
+
+.lesson-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.criterion {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.criterion strong,
+.criterion small {
+  display: block;
+}
+
+.criterion small {
+  margin-top: 5px;
+  color: var(--muted);
 }
 
 .stats-grid,
@@ -1253,12 +1317,17 @@ td small {
 
   .module-grid,
   .kanban,
-  .profile-sections {
+  .profile-sections,
+  .quality-layout {
     grid-template-columns: 1fr;
   }
 
   .profile-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lesson-checklist {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1304,6 +1373,10 @@ td small {
     justify-self: start;
     width: 118px;
     height: 118px;
+  }
+
+  .network-visual {
+    min-height: 260px;
   }
 
   .stats-grid,

@@ -35,6 +35,7 @@ try {
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
+        'create_lesson_check' => create_lesson_check($pdo, require_user($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -107,6 +108,16 @@ function init_db(PDO $pdo): void
             group_name text not null,
             time text not null,
             mentor text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists lesson_checks (
+            id integer primary key autoincrement,
+            mentor text not null,
+            group_name text not null,
+            date text not null,
+            score integer not null,
+            comment text,
+            created_by integer references users(id) on delete set null,
             created_at text not null default current_timestamp
         );
     ");
@@ -246,6 +257,25 @@ function create_feedback(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function create_lesson_check(PDO $pdo, array $user, array $input): void
+{
+    $mentor = $user['role'] === 'admin' ? required($input, 'mentor') : $user['name'];
+    $group = required($input, 'group');
+    if ($user['role'] !== 'admin' && !in_array($group, user_groups($user), true)) {
+        fail('Ментор может проверять только свои группы.', 403);
+    }
+    $stmt = $pdo->prepare('insert into lesson_checks (mentor, group_name, date, score, comment, created_by) values (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $mentor,
+        $group,
+        required($input, 'date'),
+        (int)required($input, 'score'),
+        $input['comment'] ?? '',
+        (int)$user['id'],
+    ]);
+    data_response($pdo, $user);
+}
+
 function data_response(PDO $pdo, array $user): void
 {
     respond(['user' => public_user($user), 'state' => state_for_user($pdo, $user)]);
@@ -263,6 +293,7 @@ function state_for_user(PDO $pdo, array $user): array
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
         'schedule' => $isAdmin ? all_schedule($pdo) : mentor_schedule($pdo, $user),
+        'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : mentor_lesson_checks($pdo, $user),
     ];
 }
 
@@ -304,6 +335,18 @@ function mentor_schedule(PDO $pdo, array $user): array
     $stmt = $pdo->prepare("select * from schedule where group_name in ($placeholders) or mentor = ? order by id asc");
     $stmt->execute([...$groups, $user['name']]);
     return array_map('schedule_row', $stmt->fetchAll());
+}
+
+function all_lesson_checks(PDO $pdo): array
+{
+    return array_map('lesson_check_row', $pdo->query('select * from lesson_checks order by date desc, id desc')->fetchAll());
+}
+
+function mentor_lesson_checks(PDO $pdo, array $user): array
+{
+    $stmt = $pdo->prepare('select * from lesson_checks where mentor = ? order by date desc, id desc');
+    $stmt->execute([$user['name']]);
+    return array_map('lesson_check_row', $stmt->fetchAll());
 }
 
 function rows_for_ids(PDO $pdo, string $table, array $ids): array
@@ -484,6 +527,18 @@ function schedule_row(array $row): array
         'group' => $row['group_name'],
         'time' => $row['time'],
         'mentor' => $row['mentor'],
+    ];
+}
+
+function lesson_check_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'mentor' => $row['mentor'],
+        'group' => $row['group_name'],
+        'date' => $row['date'],
+        'score' => (int)$row['score'],
+        'comment' => $row['comment'] ?? '',
     ];
 }
 

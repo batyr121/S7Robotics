@@ -10,6 +10,7 @@ const seed = {
   attendance: [],
   feedback: [],
   schedule: [],
+  lessonChecks: [],
 };
 
 const statusText = {
@@ -59,6 +60,7 @@ function normalizeState(nextState) {
   nextState.payments = nextState.payments || [];
   nextState.feedback = nextState.feedback || [];
   nextState.schedule = nextState.schedule || [];
+  nextState.lessonChecks = nextState.lessonChecks || [];
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
@@ -245,7 +247,24 @@ function crmTasks() {
         });
       });
   }
+  if (!isAdmin()) {
+    tasks.push({
+      title: "Проверить структуру следующего урока",
+      hint: "Цель, практика, контроль, фидбек",
+      view: "team",
+      tone: "soon",
+    });
+  }
   return tasks.slice(0, 6);
+}
+
+function mentorQualityStats(user = currentUser) {
+  const checks = (state.lessonChecks || []).filter((check) => isAdmin() || check.mentor === user?.name);
+  const totalScore = checks.reduce((sum, check) => sum + Number(check.score || 0), 0);
+  const avg = checks.length ? Math.round(totalScore / checks.length) : 0;
+  const level = avg >= 90 ? "Master Mentor" : avg >= 75 ? "Pro Mentor" : avg >= 55 ? "Strong Start" : "Starter";
+  const next = avg >= 90 ? "Поддерживать стандарт и наставлять команду" : "Закрыть чеклист урока на 90+";
+  return { checks, avg, level, next };
 }
 
 function renderShell() {
@@ -421,16 +440,16 @@ function dashboardLanding(totalStudents, activeStudents, visits) {
           ${isAdmin() ? `<button class="button ghost" data-view-jump="team" type="button">Команда</button>` : ""}
         </div>
       </div>
-      <div class="landing-photo-stack" aria-label="Фото образовательного центра">
-        <div class="center-photo main" style="--photo:url('assets/center-1.jpg')">
-          <span>Лаборатория S7</span>
-        </div>
-        <div class="center-photo side top" style="--photo:url('assets/center-2.jpg')">
-          <span>Robotics Lab</span>
-        </div>
-        <div class="center-photo side bottom" style="--photo:url('assets/center-3.jpg')">
-          <span>Project Zone</span>
-        </div>
+      <div class="network-visual" aria-label="Сеть S7 Robotics">
+        <div class="network-node hub">S7</div>
+        <div class="network-node n1">15</div>
+        <div class="network-node n2">19</div>
+        <div class="network-node n3">NIS</div>
+        <div class="network-node n4">32</div>
+        <div class="network-line l1"></div>
+        <div class="network-line l2"></div>
+        <div class="network-line l3"></div>
+        <div class="network-line l4"></div>
       </div>
     </section>
 
@@ -443,11 +462,11 @@ function dashboardLanding(totalStudents, activeStudents, visits) {
         <div class="map-layout">
           ${mangystauMap()}
           <div class="branch-list">
-            ${branchRow("Актау", "Головной центр", "active")}
-            ${branchRow("Жанаозен", "Бывший филиал", "archive")}
-            ${branchRow("Бейнеу", "Бывший филиал", "archive")}
-            ${branchRow("Шетпе", "Выездные занятия", "soon")}
-            ${branchRow("Форт-Шевченко", "Партнерская площадка", "neutral")}
+            ${branchRow("15 мкр, 70 здание", "Филиал S7 Robotics", "active")}
+            ${branchRow("19 мкр, 23/1", "Филиал S7 Robotics", "active")}
+            ${branchRow("32 ЖББМ", "Школьная площадка", "soon")}
+            ${branchRow("ТОО Tanym School", "Партнерская площадка", "neutral")}
+            ${branchRow("АОО NIS", "Партнерская площадка", "neutral")}
           </div>
         </div>
       </article>
@@ -487,11 +506,11 @@ function mangystauMap() {
         <path class="region" d="M168 26c63 6 106 28 130 67 29 47 70 61 125 50 50-10 84 10 92 59 8 53-20 95-77 126-61 33-130 36-206 10-71-24-117-64-138-120-17-46-5-88 35-126 19-19 32-41 39-66z" />
         <path class="road" d="M174 238c64-25 123-39 178-42 53-3 95 4 128 22" />
         <path class="road" d="M214 107c38 41 67 85 87 132 13 31 20 61 21 91" />
-        ${mapMarker(230, 170, "Актау", "active")}
-        ${mapMarker(302, 250, "Жанаозен", "archive")}
-        ${mapMarker(430, 190, "Бейнеу", "archive")}
-        ${mapMarker(282, 124, "Шетпе", "soon")}
-        ${mapMarker(188, 92, "Форт-Шевченко", "neutral")}
+        ${mapMarker(230, 170, "15 мкр", "active")}
+        ${mapMarker(252, 188, "19 мкр", "active")}
+        ${mapMarker(280, 155, "32 ЖББМ", "soon")}
+        ${mapMarker(305, 205, "Tanym", "neutral")}
+        ${mapMarker(214, 140, "NIS", "neutral")}
       </svg>
     </div>
   `;
@@ -727,6 +746,7 @@ function renderFeedback() {
 
 function renderTeam() {
   const users = isAdmin() ? state.users : [currentUser];
+  const quality = mentorQualityStats();
   return `
     ${
       isAdmin()
@@ -764,7 +784,53 @@ function renderTeam() {
         <div class="list-row"><strong>Ментор</strong><small>Только свои группы, отметки посещаемости, ученики и фидбек.</small></div>
       </div>
     </article>
+    <article class="card">
+      <div class="card-header">
+        <h3>Геймификация уроков</h3>
+        <button class="button primary" data-add-lesson-check type="button">+ Проверка урока</button>
+      </div>
+      <div class="quality-layout">
+        <div class="mentor-level">
+          <span>Уровень</span>
+          <strong>${quality.level}</strong>
+          <div class="level-ring" style="--score:${quality.avg}%">${quality.avg}</div>
+          <small>${quality.next}</small>
+        </div>
+        <div class="lesson-checklist">
+          ${lessonCriterion("Цель урока", "Ментор объяснил, что ученик соберет или запрограммирует.")}
+          ${lessonCriterion("Практика 70%", "Основное время занято сборкой, кодом и тестами, а не лекцией.")}
+          ${lessonCriterion("Контроль понимания", "Ментор задает вопросы и проверяет самостоятельность.")}
+          ${lessonCriterion("Фидбек ребенку", "После урока есть понятный следующий шаг.")}
+          ${lessonCriterion("Безопасность", "Провода, инструменты, детали и рабочее место под контролем.")}
+        </div>
+      </div>
+      <div class="card-body list">
+        ${
+          quality.checks
+            .slice(0, 6)
+            .map(
+              (check) => `
+                <div class="list-row">
+                  <div>
+                    <strong>${check.mentor} · ${check.group}</strong>
+                    <small>${formatDate(check.date)} · ${check.comment || "без комментария"}</small>
+                  </div>
+                  <span class="badge ${check.score >= 80 ? "active" : check.score >= 60 ? "soon" : "overdue"}">${check.score} баллов</span>
+                </div>`,
+            )
+            .join("") || `<div class="empty">Пока нет проверок уроков</div>`
+        }
+      </div>
+    </article>
   `;
+}
+
+function lessonCriterion(title, text) {
+  return `
+    <div class="criterion">
+      <strong>${title}</strong>
+      <small>${text}</small>
+    </div>`;
 }
 
 function scheduleCells() {
@@ -798,6 +864,7 @@ function bindViewActions() {
   });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
+  document.querySelector("[data-add-lesson-check]")?.addEventListener("click", openLessonCheckModal);
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
@@ -963,6 +1030,56 @@ function openUserModal() {
       return;
     }
     state.users.push(user);
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openLessonCheckModal() {
+  const mentorOptions = (isAdmin() ? state.users.filter((user) => user.role === "mentor") : [currentUser])
+    .map((user) => `<option>${user.name}</option>`)
+    .join("");
+  openModal(
+    "Проверка урока",
+    `<form class="modal-form" id="lessonCheckForm">
+      <label>Ментор<select name="mentor">${mentorOptions || `<option>${currentUser.name}</option>`}</select></label>
+      <label>Группа<input name="group" required placeholder="A1, 15 мкр, NIS" /></label>
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Цель урока<select name="goal"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      <label>Практика 70%<select name="practice"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      <label>Контроль понимания<select name="control"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      <label>Фидбек ученику<select name="feedback"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      <label>Безопасность<select name="safety"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      <label style="grid-column:1/-1">Комментарий<textarea name="comment" placeholder="Что улучшить на следующем уроке"></textarea></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сохранить</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#lessonCheckForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const score = ["goal", "practice", "control", "feedback", "safety"].reduce(
+      (sum, key) => sum + Number(form[key] || 0),
+      0,
+    );
+    const check = {
+      id: Date.now(),
+      mentor: form.mentor,
+      group: form.group,
+      date: form.date,
+      score,
+      comment: form.comment,
+    };
+    if (backendEnabled) {
+      await apiRequest("create_lesson_check", check);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.lessonChecks.unshift(check);
     saveState();
     closeModal();
     render();
