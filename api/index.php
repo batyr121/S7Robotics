@@ -41,6 +41,7 @@ try {
         'delete_task' => delete_task($pdo, require_user($pdo), $input),
         'delete_student' => delete_student($pdo, require_admin($pdo), $input),
         'delete_user' => delete_user($pdo, require_admin($pdo), $input),
+        'adjust_xp' => adjust_xp($pdo, require_admin($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -133,6 +134,15 @@ function init_db(PDO $pdo): void
             priority text not null default 'soon',
             status text not null default 'todo',
             due_date text,
+            created_by text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists xp_adjustments (
+            id integer primary key autoincrement,
+            mentor text not null,
+            amount integer not null,
+            reason text not null,
+            date text not null,
             created_by text not null,
             created_at text not null default current_timestamp
         );
@@ -374,6 +384,19 @@ function delete_user(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function adjust_xp(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into xp_adjustments (mentor, amount, reason, date, created_by) values (?, ?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'mentor'),
+        (int)required($input, 'amount'),
+        required($input, 'reason'),
+        $input['date'] ?? date('Y-m-d'),
+        $admin['name'],
+    ]);
+    data_response($pdo, $admin);
+}
+
 function data_response(PDO $pdo, array $user): void
 {
     respond(['user' => public_user($user), 'state' => state_for_user($pdo, $user)]);
@@ -393,6 +416,7 @@ function state_for_user(PDO $pdo, array $user): array
         'schedule' => $isAdmin ? all_schedule($pdo) : mentor_schedule($pdo, $user),
         'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : mentor_lesson_checks($pdo, $user),
         'tasks' => $isAdmin ? all_tasks($pdo) : user_tasks($pdo, $user),
+        'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : mentor_xp_adjustments($pdo, $user),
     ];
 }
 
@@ -458,6 +482,18 @@ function user_tasks(PDO $pdo, array $user): array
     $stmt = $pdo->prepare('select * from tasks where assignee = ? or created_by = ? order by created_at desc');
     $stmt->execute([$user['name'], $user['name']]);
     return array_map('task_row', $stmt->fetchAll());
+}
+
+function all_xp_adjustments(PDO $pdo): array
+{
+    return array_map('xp_adjustment_row', $pdo->query('select * from xp_adjustments order by date desc, id desc')->fetchAll());
+}
+
+function mentor_xp_adjustments(PDO $pdo, array $user): array
+{
+    $stmt = $pdo->prepare('select * from xp_adjustments where mentor = ? order by date desc, id desc');
+    $stmt->execute([$user['name']]);
+    return array_map('xp_adjustment_row', $stmt->fetchAll());
 }
 
 function rows_for_ids(PDO $pdo, string $table, array $ids): array
@@ -663,6 +699,18 @@ function task_row(array $row): array
         'priority' => $row['priority'],
         'status' => $row['status'],
         'dueDate' => $row['due_date'] ?? '',
+        'createdBy' => $row['created_by'],
+    ];
+}
+
+function xp_adjustment_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'mentor' => $row['mentor'],
+        'amount' => (int)$row['amount'],
+        'reason' => $row['reason'],
+        'date' => $row['date'],
         'createdBy' => $row['created_by'],
     ];
 }

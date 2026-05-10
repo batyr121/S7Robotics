@@ -871,6 +871,40 @@ select {
   color: var(--muted);
 }
 
+.xp-history {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.xp-history > strong {
+  font-size: 13px;
+}
+
+.xp-history div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.xp-history small {
+  color: var(--muted);
+}
+
+.xp-plus {
+  color: #08785a;
+  font-weight: 900;
+}
+
+.xp-minus {
+  color: #b02c3b;
+  font-weight: 900;
+}
+
 .stats-grid,
 .module-grid {
   display: grid;

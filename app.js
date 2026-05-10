@@ -12,6 +12,7 @@ const seed = {
   schedule: [],
   lessonChecks: [],
   tasks: [],
+  xpAdjustments: [],
 };
 
 const statusText = {
@@ -63,6 +64,7 @@ function normalizeState(nextState) {
   nextState.schedule = nextState.schedule || [];
   nextState.lessonChecks = nextState.lessonChecks || [];
   nextState.tasks = nextState.tasks || [];
+  nextState.xpAdjustments = nextState.xpAdjustments || [];
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
@@ -261,16 +263,22 @@ function crmTasks() {
 }
 
 function mentorQualityStats(user = currentUser) {
-  const checks = (state.lessonChecks || []).filter((check) => isAdmin() || check.mentor === user?.name);
+  const checks = (state.lessonChecks || []).filter((check) => check.mentor === user?.name);
+  const userStudents = user?.role === "admin" ? state.students : state.students.filter((student) => (user?.groups || []).includes(student.group) || student.mentor === user?.name);
+  const userStudentIds = new Set(userStudents.map((student) => Number(student.id)));
+  const userFeedback = (state.feedback || []).filter((note) => userStudentIds.has(Number(note.studentId)) || note.mentor === user?.name);
+  const userAttendance = (state.attendance || []).filter((item) => userStudentIds.has(Number(item.studentId)));
+  const manualXp = (state.xpAdjustments || [])
+    .filter((item) => item.mentor === user?.name)
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const today = new Date().toISOString().slice(0, 10);
-  const students = visibleStudents();
   const totalScore = checks.reduce((sum, check) => sum + Number(check.score || 0), 0);
   const avg = checks.length ? Math.round(totalScore / checks.length) : 0;
-  const xp = checks.reduce((sum, check) => sum + Number(check.score || 0), 0) + visibleFeedback().length * 15 + visibleAttendance().length * 3;
+  const xp = Math.max(0, totalScore + userFeedback.length * 15 + userAttendance.length * 3 + manualXp);
   const rank = mentorRank(xp, avg);
   const todayChecks = checks.filter((check) => check.date === today).length;
-  const todayAttendance = visibleAttendance().filter((item) => item.date === today).length;
-  const todayFeedback = visibleFeedback().filter((item) => item.date === today).length;
+  const todayAttendance = userAttendance.filter((item) => item.date === today).length;
+  const todayFeedback = userFeedback.filter((item) => item.date === today).length;
   const perfectChecks = checks.filter((check) => Number(check.score) >= 90).length;
   const streak = mentorStreak(checks);
   const tasks = [
@@ -282,10 +290,10 @@ function mentorQualityStats(user = currentUser) {
   const achievements = [
     achievement("Первый контроль", checks.length >= 1, "Сделать первую проверку урока"),
     achievement("Стабильный стандарт", perfectChecks >= 3, "3 урока с качеством 90+"),
-    achievement("Фидбек-мастер", visibleFeedback().length >= Math.max(3, students.length), "Фидбеков не меньше числа учеников"),
+    achievement("Фидбек-мастер", userFeedback.length >= Math.max(3, userStudents.length), "Фидбеков не меньше числа учеников"),
     achievement("Серия наставника", streak >= 3, "3 дня подряд с проверками"),
   ];
-  return { checks, avg, xp, rank, tasks, achievements, next: rank.next, streak };
+  return { checks, avg, xp, manualXp, rank, tasks, achievements, next: rank.next, streak };
 }
 
 function mentorRank(xp, avg) {
@@ -879,7 +887,7 @@ function taskPriorityText(priority) {
 
 function renderTeam() {
   const users = isAdmin() ? state.users : [currentUser];
-  const quality = mentorQualityStats();
+  const mentors = users.filter((user) => user.role === "mentor");
   return `
     ${
       isAdmin()
@@ -918,18 +926,29 @@ function renderTeam() {
         <div class="list-row"><strong>Ментор</strong><small>Только свои группы, отметки посещаемости, ученики и фидбек.</small></div>
       </div>
     </article>
+    ${mentors.map((mentor) => mentorGamificationCard(mentor)).join("") || `<div class="empty">Создайте аккаунт ментора, чтобы включить геймификацию</div>`}
+  `;
+}
+
+function mentorGamificationCard(mentor) {
+  const quality = mentorQualityStats(mentor);
+  const adjustments = (state.xpAdjustments || []).filter((item) => item.mentor === mentor.name).slice(0, 3);
+  return `
     <article class="card">
       <div class="card-header">
-        <h3>Геймификация уроков</h3>
-        <button class="button primary" data-add-lesson-check type="button">+ Проверка урока</button>
+        <h3>${mentor.name} · личная проверка уроков</h3>
+        <div class="filters">
+          <button class="button primary" data-add-lesson-check="${mentor.name}" type="button">+ Проверить урок</button>
+          ${isAdmin() ? `<button class="button secondary" data-adjust-xp="${mentor.name}" type="button">XP + / -</button>` : ""}
+        </div>
       </div>
       <div class="quality-layout">
         <div class="mentor-level">
-          <span>Ранг ментора</span>
+          <span>Личный ранг</span>
           <strong>${quality.rank.title}</strong>
           <div class="level-ring" style="--score:${quality.avg}%">${quality.avg}</div>
-          <small>${quality.xp} XP · серия ${quality.streak} дней</small>
-          <small>${quality.next}</small>
+          <small>${quality.xp} XP · ручной XP ${quality.manualXp >= 0 ? "+" : ""}${quality.manualXp}</small>
+          <small>Серия ${quality.streak} дней · ${quality.next}</small>
         </div>
         <div class="lesson-checklist">
           ${lessonCriterion("Цель и результат", "Ученик понимает, что создаёт и как выглядит успех.")}
@@ -943,15 +962,11 @@ function renderTeam() {
       <div class="gamification-grid">
         <section>
           <h4>Ежедневные задания</h4>
-          <div class="mission-list">
-            ${quality.tasks.map((task) => missionRow(task)).join("")}
-          </div>
+          <div class="mission-list">${quality.tasks.map((task) => missionRow(task)).join("")}</div>
         </section>
         <section>
           <h4>Достижения</h4>
-          <div class="achievement-list">
-            ${quality.achievements.map((item) => achievementRow(item)).join("")}
-          </div>
+          <div class="achievement-list">${quality.achievements.map((item) => achievementRow(item)).join("")}</div>
         </section>
       </div>
       <div class="card-body list">
@@ -962,17 +977,32 @@ function renderTeam() {
               (check) => `
                 <div class="list-row">
                   <div>
-                    <strong>${check.mentor} · ${check.group}</strong>
+                    <strong>${check.group}</strong>
                     <small>${formatDate(check.date)} · ${check.comment || "без комментария"}</small>
                   </div>
                   <span class="badge ${check.score >= 80 ? "active" : check.score >= 60 ? "soon" : "overdue"}">${check.score} баллов</span>
                 </div>`,
             )
-            .join("") || `<div class="empty">Пока нет проверок уроков</div>`
+            .join("") || `<div class="empty">Пока нет личных проверок уроков</div>`
+        }
+        ${
+          adjustments.length
+            ? `<div class="xp-history">
+                <strong>Ручные изменения XP</strong>
+                ${adjustments
+                  .map(
+                    (item) => `
+                      <div>
+                        <span class="${item.amount >= 0 ? "xp-plus" : "xp-minus"}">${item.amount >= 0 ? "+" : ""}${item.amount} XP</span>
+                        <small>${formatDate(item.date)} · ${item.reason}</small>
+                      </div>`,
+                  )
+                  .join("")}
+              </div>`
+            : ""
         }
       </div>
-    </article>
-  `;
+    </article>`;
 }
 
 function lessonCriterion(title, text) {
@@ -1049,7 +1079,12 @@ function bindViewActions() {
   document.querySelectorAll("[data-task-status]").forEach((select) => {
     select.addEventListener("change", () => updateTaskStatus(Number(select.dataset.taskStatus), select.value));
   });
-  document.querySelector("[data-add-lesson-check]")?.addEventListener("click", openLessonCheckModal);
+  document.querySelectorAll("[data-add-lesson-check]").forEach((button) => {
+    button.addEventListener("click", () => openLessonCheckModal(button.dataset.addLessonCheck || ""));
+  });
+  document.querySelectorAll("[data-adjust-xp]").forEach((button) => {
+    button.addEventListener("click", () => openXpModal(button.dataset.adjustXp));
+  });
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
@@ -1321,9 +1356,9 @@ async function deleteUser(userId) {
   render();
 }
 
-function openLessonCheckModal() {
+function openLessonCheckModal(selectedMentor = "") {
   const mentorOptions = (isAdmin() ? state.users.filter((user) => user.role === "mentor") : [currentUser])
-    .map((user) => `<option>${user.name}</option>`)
+    .map((user) => `<option ${user.name === selectedMentor ? "selected" : ""}>${user.name}</option>`)
     .join("");
   openModal(
     "Проверка урока",
@@ -1370,6 +1405,48 @@ function openLessonCheckModal() {
       return;
     }
     state.lessonChecks.unshift(check);
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openXpModal(selectedMentor) {
+  if (!isAdmin()) return;
+  const mentorOptions = state.users
+    .filter((user) => user.role === "mentor")
+    .map((user) => `<option ${user.name === selectedMentor ? "selected" : ""}>${user.name}</option>`)
+    .join("");
+  openModal(
+    "Изменить XP ментора",
+    `<form class="modal-form" id="xpForm">
+      <label>Ментор<select name="mentor">${mentorOptions}</select></label>
+      <label>XP<input name="amount" type="number" required placeholder="Например, 50 или -20" /></label>
+      <label style="grid-column:1/-1">Причина<textarea name="reason" required placeholder="За что добавляем или убавляем XP"></textarea></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сохранить</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#xpForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const adjustment = {
+      id: Date.now(),
+      mentor: form.mentor,
+      amount: Number(form.amount),
+      reason: form.reason,
+      date: new Date().toISOString().slice(0, 10),
+      createdBy: currentUser.name,
+    };
+    if (backendEnabled) {
+      await apiRequest("adjust_xp", adjustment);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.xpAdjustments.unshift(adjustment);
     saveState();
     closeModal();
     render();
