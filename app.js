@@ -260,11 +260,65 @@ function crmTasks() {
 
 function mentorQualityStats(user = currentUser) {
   const checks = (state.lessonChecks || []).filter((check) => isAdmin() || check.mentor === user?.name);
+  const today = new Date().toISOString().slice(0, 10);
+  const students = visibleStudents();
   const totalScore = checks.reduce((sum, check) => sum + Number(check.score || 0), 0);
   const avg = checks.length ? Math.round(totalScore / checks.length) : 0;
-  const level = avg >= 90 ? "Master Mentor" : avg >= 75 ? "Pro Mentor" : avg >= 55 ? "Strong Start" : "Starter";
-  const next = avg >= 90 ? "Поддерживать стандарт и наставлять команду" : "Закрыть чеклист урока на 90+";
-  return { checks, avg, level, next };
+  const xp = checks.reduce((sum, check) => sum + Number(check.score || 0), 0) + visibleFeedback().length * 15 + visibleAttendance().length * 3;
+  const rank = mentorRank(xp, avg);
+  const todayChecks = checks.filter((check) => check.date === today).length;
+  const todayAttendance = visibleAttendance().filter((item) => item.date === today).length;
+  const todayFeedback = visibleFeedback().filter((item) => item.date === today).length;
+  const perfectChecks = checks.filter((check) => Number(check.score) >= 90).length;
+  const streak = mentorStreak(checks);
+  const tasks = [
+    dailyTask("Отметить посещаемость", todayAttendance > 0, `${todayAttendance} отметок сегодня`),
+    dailyTask("Добавить фидбек", todayFeedback > 0, `${todayFeedback} заметок сегодня`),
+    dailyTask("Проверить урок", todayChecks > 0, `${todayChecks} проверок сегодня`),
+    dailyTask("Закрыть качество 85+", checks.some((check) => check.date === today && Number(check.score) >= 85), "цель на день"),
+  ];
+  const achievements = [
+    achievement("Первый контроль", checks.length >= 1, "Сделать первую проверку урока"),
+    achievement("Стабильный стандарт", perfectChecks >= 3, "3 урока с качеством 90+"),
+    achievement("Фидбек-мастер", visibleFeedback().length >= Math.max(3, students.length), "Фидбеков не меньше числа учеников"),
+    achievement("Серия наставника", streak >= 3, "3 дня подряд с проверками"),
+  ];
+  return { checks, avg, xp, rank, tasks, achievements, next: rank.next, streak };
+}
+
+function mentorRank(xp, avg) {
+  const ranks = [
+    { title: "Rookie Mentor", min: 0, next: "Набрать 300 XP и средний балл 60+" },
+    { title: "Builder Mentor", min: 300, next: "Набрать 750 XP и средний балл 75+" },
+    { title: "Pro Mentor", min: 750, next: "Набрать 1400 XP и средний балл 85+" },
+    { title: "Master Mentor", min: 1400, next: "Держать 90+ и помогать другим менторам" },
+  ];
+  let rank = ranks[0];
+  if (xp >= 1400 && avg >= 85) rank = ranks[3];
+  else if (xp >= 750 && avg >= 75) rank = ranks[2];
+  else if (xp >= 300 && avg >= 60) rank = ranks[1];
+  return rank;
+}
+
+function mentorStreak(checks) {
+  const dates = [...new Set(checks.map((check) => check.date))].sort().reverse();
+  let streak = 0;
+  const cursor = new Date();
+  for (const date of dates) {
+    const expected = cursor.toISOString().slice(0, 10);
+    if (date !== expected) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function dailyTask(title, done, hint) {
+  return { title, done, hint };
+}
+
+function achievement(title, unlocked, hint) {
+  return { title, unlocked, hint };
 }
 
 function renderShell() {
@@ -791,18 +845,34 @@ function renderTeam() {
       </div>
       <div class="quality-layout">
         <div class="mentor-level">
-          <span>Уровень</span>
-          <strong>${quality.level}</strong>
+          <span>Ранг ментора</span>
+          <strong>${quality.rank.title}</strong>
           <div class="level-ring" style="--score:${quality.avg}%">${quality.avg}</div>
+          <small>${quality.xp} XP · серия ${quality.streak} дней</small>
           <small>${quality.next}</small>
         </div>
         <div class="lesson-checklist">
-          ${lessonCriterion("Цель урока", "Ментор объяснил, что ученик соберет или запрограммирует.")}
-          ${lessonCriterion("Практика 70%", "Основное время занято сборкой, кодом и тестами, а не лекцией.")}
-          ${lessonCriterion("Контроль понимания", "Ментор задает вопросы и проверяет самостоятельность.")}
-          ${lessonCriterion("Фидбек ребенку", "После урока есть понятный следующий шаг.")}
-          ${lessonCriterion("Безопасность", "Провода, инструменты, детали и рабочее место под контролем.")}
+          ${lessonCriterion("Цель и результат", "Ученик понимает, что создаёт и как выглядит успех.")}
+          ${lessonCriterion("Практика и темп", "Большая часть занятия уходит на сборку, код и эксперименты.")}
+          ${lessonCriterion("Вопросы и диагностика", "Ментор проверяет понимание, а не просто показывает решение.")}
+          ${lessonCriterion("Дисциплина и безопасность", "Рабочее место, инструменты и поведение под контролем.")}
+          ${lessonCriterion("Индивидуальный прогресс", "Есть следующий шаг для каждого ученика.")}
+          ${lessonCriterion("Фидбек и CRM", "После урока заполнены отметки и комментарии.")}
         </div>
+      </div>
+      <div class="gamification-grid">
+        <section>
+          <h4>Ежедневные задания</h4>
+          <div class="mission-list">
+            ${quality.tasks.map((task) => missionRow(task)).join("")}
+          </div>
+        </section>
+        <section>
+          <h4>Достижения</h4>
+          <div class="achievement-list">
+            ${quality.achievements.map((item) => achievementRow(item)).join("")}
+          </div>
+        </section>
       </div>
       <div class="card-body list">
         ${
@@ -830,6 +900,28 @@ function lessonCriterion(title, text) {
     <div class="criterion">
       <strong>${title}</strong>
       <small>${text}</small>
+    </div>`;
+}
+
+function missionRow(task) {
+  return `
+    <div class="mission ${task.done ? "done" : ""}">
+      <span>${task.done ? "✓" : "•"}</span>
+      <div>
+        <strong>${task.title}</strong>
+        <small>${task.hint}</small>
+      </div>
+    </div>`;
+}
+
+function achievementRow(item) {
+  return `
+    <div class="achievement ${item.unlocked ? "unlocked" : ""}">
+      <span>${item.unlocked ? "★" : "☆"}</span>
+      <div>
+        <strong>${item.title}</strong>
+        <small>${item.hint}</small>
+      </div>
     </div>`;
 }
 
@@ -1046,11 +1138,16 @@ function openLessonCheckModal() {
       <label>Ментор<select name="mentor">${mentorOptions || `<option>${currentUser.name}</option>`}</select></label>
       <label>Группа<input name="group" required placeholder="A1, 15 мкр, NIS" /></label>
       <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
-      <label>Цель урока<select name="goal"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
-      <label>Практика 70%<select name="practice"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
-      <label>Контроль понимания<select name="control"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
-      <label>Фидбек ученику<select name="feedback"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
-      <label>Безопасность<select name="safety"><option value="20">Да</option><option value="10">Частично</option><option value="0">Нет</option></select></label>
+      ${qualitySelect("goal", "Цель урока", 10)}
+      ${qualitySelect("demo", "Демо и объяснение", 10)}
+      ${qualitySelect("practice", "Практика 70%", 15)}
+      ${qualitySelect("individual", "Индивидуальный подход", 10)}
+      ${qualitySelect("questions", "Вопросы ученикам", 10)}
+      ${qualitySelect("debug", "Разбор ошибок", 10)}
+      ${qualitySelect("discipline", "Дисциплина группы", 10)}
+      ${qualitySelect("safety", "Безопасность", 10)}
+      ${qualitySelect("feedback", "Фидбек после урока", 10)}
+      ${qualitySelect("crm", "CRM заполнена", 5)}
       <label style="grid-column:1/-1">Комментарий<textarea name="comment" placeholder="Что улучшить на следующем уроке"></textarea></label>
       <div class="form-actions">
         <button class="button ghost" data-close-modal type="button">Отмена</button>
@@ -1061,7 +1158,7 @@ function openLessonCheckModal() {
   modalRoot.querySelector("#lessonCheckForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const score = ["goal", "practice", "control", "feedback", "safety"].reduce(
+    const score = lessonQualityCriteria().reduce(
       (sum, key) => sum + Number(form[key] || 0),
       0,
     );
@@ -1084,6 +1181,22 @@ function openLessonCheckModal() {
     closeModal();
     render();
   });
+}
+
+function lessonQualityCriteria() {
+  return ["goal", "demo", "practice", "individual", "questions", "debug", "discipline", "safety", "feedback", "crm"];
+}
+
+function qualitySelect(name, label, weight) {
+  const half = Math.round(weight / 2);
+  return `
+    <label>${label} · ${weight}
+      <select name="${name}">
+        <option value="${weight}">Отлично</option>
+        <option value="${half}">Частично</option>
+        <option value="0">Нет</option>
+      </select>
+    </label>`;
 }
 
 function openStudentModal() {

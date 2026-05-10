@@ -752,6 +752,75 @@ select {
   color: var(--muted);
 }
 
+.gamification-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 0 18px 18px;
+}
+
+.gamification-grid section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.gamification-grid h4 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.mission-list,
+.achievement-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mission,
+.achievement {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.mission > span,
+.achievement > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef3f8;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.mission.done > span,
+.achievement.unlocked > span {
+  background: rgba(18, 168, 122, 0.14);
+  color: #08785a;
+}
+
+.mission strong,
+.mission small,
+.achievement strong,
+.achievement small {
+  display: block;
+}
+
+.mission small,
+.achievement small {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
 .stats-grid,
 .module-grid {
   display: grid;
@@ -1326,7 +1395,8 @@ td small {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .lesson-checklist {
+  .lesson-checklist,
+  .gamification-grid {
     grid-template-columns: 1fr;
   }
 }
