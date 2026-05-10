@@ -223,18 +223,27 @@ function renderShell() {
 }
 
 function updateAuthMode() {
+  const tabs = document.querySelector(".auth-tabs");
+  const loginTab = document.querySelector('[data-auth-tab="login"]');
+  const registerTab = document.querySelector('[data-auth-tab="register"]');
+  const loginForm = document.querySelector("#loginForm");
+  const registerForm = document.querySelector("#registerForm");
   const roleSelect = document.querySelector('#registerForm select[name="role"]');
   const groupsInput = document.querySelector('#registerForm input[name="groups"]');
-  if (!roleSelect || !groupsInput) return;
+  if (!tabs || !roleSelect || !groupsInput || !loginTab || !registerTab || !loginForm || !registerForm) return;
   if (state.users.length === 0) {
+    tabs.hidden = false;
+    registerTab.hidden = false;
     roleSelect.value = "admin";
     roleSelect.disabled = true;
     groupsInput.disabled = true;
     groupsInput.placeholder = "Первый аккаунт получает полный доступ";
   } else {
-    roleSelect.disabled = false;
-    groupsInput.disabled = false;
-    groupsInput.placeholder = "A1, B2";
+    registerTab.hidden = true;
+    loginTab.classList.add("active");
+    registerTab.classList.remove("active");
+    loginForm.hidden = false;
+    registerForm.hidden = true;
   }
 }
 
@@ -576,6 +585,14 @@ function renderFeedback() {
 function renderTeam() {
   const users = isAdmin() ? state.users : [currentUser];
   return `
+    ${
+      isAdmin()
+        ? `<div class="toolbar">
+            <button class="button primary" data-add-user type="button">+ Аккаунт</button>
+            <span class="badge neutral">регистрация только через админа</span>
+          </div>`
+        : ""
+    }
     <div class="team-grid">
       ${users
         .map(
@@ -637,6 +654,7 @@ function bindViewActions() {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
   });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
+  document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
@@ -753,6 +771,47 @@ function openModal(title, content) {
 function closeModal() {
   modalRoot.hidden = true;
   modalRoot.innerHTML = "";
+}
+
+function openUserModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Новый аккаунт",
+    `<form class="modal-form" id="userForm">
+      <label>Имя<input name="name" required placeholder="Имя и фамилия" /></label>
+      <label>Email<input name="email" type="email" required placeholder="mentor@s7.kz" /></label>
+      <label>Пароль<input name="password" type="password" required minlength="4" placeholder="Временный пароль" /></label>
+      <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="admin">Админ</option></select></label>
+      <label style="grid-column:1/-1">Группы ментора<input name="groups" placeholder="A1, B2, Senior" /></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Создать</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#userForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const email = form.email.trim().toLowerCase();
+    if (state.users.some((user) => user.email.toLowerCase() === email)) {
+      modalRoot.querySelector("#userForm").insertAdjacentHTML(
+        "afterbegin",
+        `<div class="form-alert">Такой email уже есть.</div>`,
+      );
+      return;
+    }
+    state.users.push({
+      id: Date.now(),
+      name: form.name.trim(),
+      email,
+      password: form.password,
+      role: form.role,
+      groups: form.role === "admin" ? [] : form.groups.split(",").map((group) => group.trim()).filter(Boolean),
+    });
+    saveState();
+    closeModal();
+    render();
+  });
 }
 
 function openStudentModal() {
@@ -940,6 +999,11 @@ document.querySelector("#loginForm").addEventListener("submit", (event) => {
 document.querySelector("#registerForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (state.users.length > 0) {
+    showAuthError("Публичная регистрация закрыта. Аккаунты создает администратор внутри CRM.");
+    updateAuthMode();
+    return;
+  }
   if (state.users.some((user) => user.email.toLowerCase() === form.email.toLowerCase())) {
     showAuthError("Такой email уже зарегистрирован.");
     return;

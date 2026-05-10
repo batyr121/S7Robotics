@@ -939,6 +939,16 @@ td small {
   gap: 10px;
 }
 
+.form-alert {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(226, 75, 91, 0.12);
+  color: #b02c3b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .empty {
   padding: 34px;
   border: 1px dashed var(--line);
