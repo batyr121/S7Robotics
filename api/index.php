@@ -36,6 +36,8 @@ try {
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
         'create_lesson_check' => create_lesson_check($pdo, require_user($pdo), $input),
+        'create_task' => create_task($pdo, require_user($pdo), $input),
+        'update_task_status' => update_task_status($pdo, require_user($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -118,6 +120,17 @@ function init_db(PDO $pdo): void
             score integer not null,
             comment text,
             created_by integer references users(id) on delete set null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists tasks (
+            id integer primary key autoincrement,
+            title text not null,
+            description text,
+            assignee text not null,
+            priority text not null default 'soon',
+            status text not null default 'todo',
+            due_date text,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
     ");
@@ -276,6 +289,47 @@ function create_lesson_check(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function create_task(PDO $pdo, array $user, array $input): void
+{
+    $assignee = required($input, 'assignee');
+    if ($user['role'] !== 'admin' && $assignee !== $user['name']) {
+        fail('Ментор может назначать задачи только себе.', 403);
+    }
+    $stmt = $pdo->prepare('
+        insert into tasks (title, description, assignee, priority, status, due_date, created_by)
+        values (?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        required($input, 'title'),
+        $input['description'] ?? '',
+        $assignee,
+        $input['priority'] ?? 'soon',
+        $input['status'] ?? 'todo',
+        $input['dueDate'] ?? '',
+        $user['name'],
+    ]);
+    data_response($pdo, $user);
+}
+
+function update_task_status(PDO $pdo, array $user, array $input): void
+{
+    $taskId = (int)required($input, 'id');
+    $status = required($input, 'status');
+    if (!in_array($status, ['todo', 'progress', 'done'], true)) {
+        fail('Некорректный статус задачи.', 422);
+    }
+    $stmt = $pdo->prepare('select * from tasks where id = ?');
+    $stmt->execute([$taskId]);
+    $task = $stmt->fetch();
+    if (!$task) fail('Задача не найдена.', 404);
+    if ($user['role'] !== 'admin' && $task['assignee'] !== $user['name'] && $task['created_by'] !== $user['name']) {
+        fail('Нет доступа к задаче.', 403);
+    }
+    $stmt = $pdo->prepare('update tasks set status = ? where id = ?');
+    $stmt->execute([$status, $taskId]);
+    data_response($pdo, $user);
+}
+
 function data_response(PDO $pdo, array $user): void
 {
     respond(['user' => public_user($user), 'state' => state_for_user($pdo, $user)]);
@@ -294,6 +348,7 @@ function state_for_user(PDO $pdo, array $user): array
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
         'schedule' => $isAdmin ? all_schedule($pdo) : mentor_schedule($pdo, $user),
         'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : mentor_lesson_checks($pdo, $user),
+        'tasks' => $isAdmin ? all_tasks($pdo) : user_tasks($pdo, $user),
     ];
 }
 
@@ -347,6 +402,18 @@ function mentor_lesson_checks(PDO $pdo, array $user): array
     $stmt = $pdo->prepare('select * from lesson_checks where mentor = ? order by date desc, id desc');
     $stmt->execute([$user['name']]);
     return array_map('lesson_check_row', $stmt->fetchAll());
+}
+
+function all_tasks(PDO $pdo): array
+{
+    return array_map('task_row', $pdo->query('select * from tasks order by created_at desc')->fetchAll());
+}
+
+function user_tasks(PDO $pdo, array $user): array
+{
+    $stmt = $pdo->prepare('select * from tasks where assignee = ? or created_by = ? order by created_at desc');
+    $stmt->execute([$user['name'], $user['name']]);
+    return array_map('task_row', $stmt->fetchAll());
 }
 
 function rows_for_ids(PDO $pdo, string $table, array $ids): array
@@ -539,6 +606,20 @@ function lesson_check_row(array $row): array
         'date' => $row['date'],
         'score' => (int)$row['score'],
         'comment' => $row['comment'] ?? '',
+    ];
+}
+
+function task_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'title' => $row['title'],
+        'description' => $row['description'] ?? '',
+        'assignee' => $row['assignee'],
+        'priority' => $row['priority'],
+        'status' => $row['status'],
+        'dueDate' => $row['due_date'] ?? '',
+        'createdBy' => $row['created_by'],
     ];
 }
 

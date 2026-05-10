@@ -1273,6 +1273,70 @@ td small {
   gap: 14px;
 }
 
+.task-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.task-lane {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(8, 36, 77, 0.07);
+}
+
+.task-lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.task-lane-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.team-task {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.team-task p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-topline,
+.task-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-topline small,
+.task-footer small {
+  color: var(--muted);
+}
+
+.task-footer select {
+  min-height: 34px;
+  max-width: 132px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
 .profile {
   padding: 16px;
 }
@@ -1455,7 +1519,8 @@ td small {
   }
 
   .stats-grid,
-  .team-grid {
+  .team-grid,
+  .task-board {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1530,6 +1595,7 @@ td small {
 
   .stats-grid,
   .team-grid,
+  .task-board,
   .attendance-grid,
   .profile-summary {
     grid-template-columns: 1fr;

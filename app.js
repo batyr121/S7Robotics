@@ -11,6 +11,7 @@ const seed = {
   feedback: [],
   schedule: [],
   lessonChecks: [],
+  tasks: [],
 };
 
 const statusText = {
@@ -61,6 +62,7 @@ function normalizeState(nextState) {
   nextState.feedback = nextState.feedback || [];
   nextState.schedule = nextState.schedule || [];
   nextState.lessonChecks = nextState.lessonChecks || [];
+  nextState.tasks = nextState.tasks || [];
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
@@ -140,7 +142,7 @@ function isAdmin() {
 function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
-  return ["dashboard", "students", "attendance", "feedback", "team"].includes(view);
+  return ["dashboard", "students", "attendance", "feedback", "tasks", "team"].includes(view);
 }
 
 function visibleStudents() {
@@ -387,6 +389,7 @@ function updatePageTitle() {
     attendance: "Табель посещаемости",
     payments: "Абонементы",
     feedback: "Фидбек",
+    tasks: "Задачи",
     team: "Команда",
   }[activeView];
 }
@@ -398,6 +401,7 @@ function render() {
     attendance: renderAttendance,
     payments: renderPayments,
     feedback: renderFeedback,
+    tasks: renderTasks,
     team: renderTeam,
   };
   appView.innerHTML = renderers[activeView]();
@@ -798,6 +802,73 @@ function renderFeedback() {
   `;
 }
 
+function visibleTasks() {
+  if (isAdmin()) return state.tasks || [];
+  return (state.tasks || []).filter((task) => task.assignee === currentUser?.name || task.createdBy === currentUser?.name);
+}
+
+function renderTasks() {
+  const tasks = visibleTasks();
+  const lanes = [
+    ["todo", "Новые"],
+    ["progress", "В работе"],
+    ["done", "Готово"],
+  ];
+  return `
+    <div class="toolbar">
+      <button class="button primary" data-add-task type="button">+ Задача</button>
+      <span class="badge neutral">${isAdmin() ? "вся команда" : "мои задачи"}</span>
+    </div>
+    <div class="task-board">
+      ${lanes
+        .map(([status, title]) => {
+          const laneTasks = tasks.filter((task) => task.status === status);
+          return `
+            <section class="task-lane">
+              <div class="task-lane-head">
+                <h3>${title}</h3>
+                <span class="badge neutral">${laneTasks.length}</span>
+              </div>
+              <div class="list">
+                ${
+                  laneTasks
+                    .map(
+                      (task) => `
+                        <article class="team-task">
+                          <div class="task-topline">
+                            <span class="badge ${task.priority}">${taskPriorityText(task.priority)}</span>
+                            <small>${task.dueDate ? formatDate(task.dueDate) : "без дедлайна"}</small>
+                          </div>
+                          <strong>${task.title}</strong>
+                          <p>${task.description || "Описание не добавлено"}</p>
+                          <div class="task-footer">
+                            <small>Ответственный: ${task.assignee || "не назначен"}</small>
+                            <select data-task-status="${task.id}">
+                              <option value="todo" ${task.status === "todo" ? "selected" : ""}>Новые</option>
+                              <option value="progress" ${task.status === "progress" ? "selected" : ""}>В работе</option>
+                              <option value="done" ${task.status === "done" ? "selected" : ""}>Готово</option>
+                            </select>
+                          </div>
+                        </article>`,
+                    )
+                    .join("") || `<div class="empty">Пусто</div>`
+                }
+              </div>
+            </section>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function taskPriorityText(priority) {
+  return {
+    active: "Низкий",
+    soon: "Средний",
+    overdue: "Высокий",
+  }[priority] || "Средний";
+}
+
 function renderTeam() {
   const users = isAdmin() ? state.users : [currentUser];
   const quality = mentorQualityStats();
@@ -956,6 +1027,10 @@ function bindViewActions() {
   });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
+  document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
+  document.querySelectorAll("[data-task-status]").forEach((select) => {
+    select.addEventListener("change", () => updateTaskStatus(Number(select.dataset.taskStatus), select.value));
+  });
   document.querySelector("[data-add-lesson-check]")?.addEventListener("click", openLessonCheckModal);
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
@@ -1126,6 +1201,62 @@ function openUserModal() {
     closeModal();
     render();
   });
+}
+
+function openTaskModal() {
+  const users = isAdmin() ? state.users : [currentUser];
+  const assigneeOptions = users.map((user) => `<option>${user.name}</option>`).join("");
+  openModal(
+    "Новая задача",
+    `<form class="modal-form" id="taskForm">
+      <label>Название<input name="title" required placeholder="Например, подготовить набор Arduino" /></label>
+      <label>Ответственный<select name="assignee">${assigneeOptions}</select></label>
+      <label>Приоритет<select name="priority"><option value="soon">Средний</option><option value="overdue">Высокий</option><option value="active">Низкий</option></select></label>
+      <label>Дедлайн<input name="dueDate" type="date" /></label>
+      <label style="grid-column:1/-1">Описание<textarea name="description" placeholder="Что нужно сделать, где, для какой группы"></textarea></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Создать</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#taskForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const task = {
+      id: Date.now(),
+      title: form.title,
+      assignee: form.assignee,
+      priority: form.priority,
+      dueDate: form.dueDate,
+      description: form.description,
+      status: "todo",
+      createdBy: currentUser.name,
+    };
+    if (backendEnabled) {
+      await apiRequest("create_task", task);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.tasks.unshift(task);
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+async function updateTaskStatus(taskId, status) {
+  if (backendEnabled) {
+    await apiRequest("update_task_status", { id: taskId, status });
+    await refreshData();
+    return;
+  }
+  const task = state.tasks.find((item) => Number(item.id) === Number(taskId));
+  if (!task) return;
+  task.status = status;
+  saveState();
+  render();
 }
 
 function openLessonCheckModal() {
