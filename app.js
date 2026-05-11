@@ -13,6 +13,8 @@ const seed = {
   lessonChecks: [],
   tasks: [],
   xpAdjustments: [],
+  salaries: [],
+  methods: [],
 };
 
 const statusText = {
@@ -65,6 +67,8 @@ function normalizeState(nextState) {
   nextState.lessonChecks = nextState.lessonChecks || [];
   nextState.tasks = nextState.tasks || [];
   nextState.xpAdjustments = nextState.xpAdjustments || [];
+  nextState.salaries = nextState.salaries || [];
+  nextState.methods = nextState.methods || [];
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
@@ -144,7 +148,7 @@ function isAdmin() {
 function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
-  return ["dashboard", "students", "attendance", "feedback", "tasks", "team"].includes(view);
+  return ["dashboard", "students", "attendance", "schedule", "feedback", "tasks", "methods", "salary", "team"].includes(view);
 }
 
 function visibleStudents() {
@@ -386,17 +390,24 @@ function mentorQualityStats(user = currentUser) {
 }
 
 function mentorRank(xp, avg) {
-  const ranks = [
-    { title: "Rookie Mentor", min: 0, next: "Набрать 300 XP и средний балл 60+" },
-    { title: "Builder Mentor", min: 300, next: "Набрать 750 XP и средний балл 75+" },
-    { title: "Pro Mentor", min: 750, next: "Набрать 1400 XP и средний балл 85+" },
-    { title: "Master Mentor", min: 1400, next: "Держать 90+ и помогать другим менторам" },
+  const titles = [
+    "Level 1 · Rookie",
+    "Level 2 · Assistant",
+    "Level 3 · Builder",
+    "Level 4 · Instructor",
+    "Level 5 · Coach",
+    "Level 6 · Engineer",
+    "Level 7 · Pro Mentor",
+    "Level 8 · Methodist",
+    "Level 9 · Lead Mentor",
+    "Level 10 · Master",
   ];
-  let rank = ranks[0];
-  if (xp >= 1400 && avg >= 85) rank = ranks[3];
-  else if (xp >= 750 && avg >= 75) rank = ranks[2];
-  else if (xp >= 300 && avg >= 60) rank = ranks[1];
-  return rank;
+  const level = Math.min(10, Math.max(1, Math.floor(xp / 100) + 1));
+  const nextXp = level >= 10 ? 1000 : level * 100;
+  const next = level >= 10
+    ? `Максимальный уровень · средний балл ${avg}%`
+    : `До ${titles[level]} осталось ${Math.max(0, nextXp - xp)} XP`;
+  return { title: titles[level - 1], level, next };
 }
 
 function mentorStreak(checks) {
@@ -484,9 +495,12 @@ function updatePageTitle() {
     dashboard: "Обзор",
     students: "Ученики",
     attendance: "Табель посещаемости",
+    schedule: "Расписание",
     payments: "Абонементы",
     feedback: "Фидбек",
     tasks: "Задачи",
+    methods: "Методика",
+    salary: "Зарплаты",
     team: "Команда",
   }[activeView];
 }
@@ -496,9 +510,12 @@ function render() {
     dashboard: renderDashboard,
     students: renderStudents,
     attendance: renderAttendance,
+    schedule: renderSchedule,
     payments: renderPayments,
     feedback: renderFeedback,
     tasks: renderTasks,
+    methods: renderMethods,
+    salary: renderSalary,
     team: renderTeam,
   };
   appView.innerHTML = renderers[activeView]();
@@ -837,6 +854,40 @@ function renderAttendance() {
   `;
 }
 
+function renderSchedule() {
+  const lessons = visibleSchedule();
+  return `
+    <div class="toolbar">
+      ${isAdmin() ? `<button class="button primary" data-add-schedule type="button">+ Занятие</button>` : ""}
+      <span class="badge neutral">${isAdmin() ? "все группы" : "мое расписание"}</span>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Расписание групп</h3><span class="badge neutral">${lessons.length} занятий</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>День</th><th>Время</th><th>Группа</th><th>Ментор</th><th>Действия</th></tr></thead>
+          <tbody>
+            ${
+              lessons
+                .map(
+                  (lesson) => `
+                    <tr>
+                      <td><strong>${lesson.day}</strong></td>
+                      <td>${lesson.time}</td>
+                      <td>${lesson.group}</td>
+                      <td>${lesson.mentor}</td>
+                      <td>${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : `<span class="badge neutral">просмотр</span>`}</td>
+                    </tr>`,
+                )
+                .join("") || `<tr><td colspan="5"><div class="empty">Расписание пока не составлено</div></td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
 function attendanceDates(studentIds = visibleStudentIds()) {
   const dates = [
     ...new Set(
@@ -931,6 +982,89 @@ function renderFeedback() {
         })
         .join("")}
     </div>
+  `;
+}
+
+function visibleMethods() {
+  if (isAdmin()) return state.methods || [];
+  const groups = new Set(currentUser?.groups || []);
+  return (state.methods || []).filter((item) => groups.has(item.group) || item.mentor === currentUser?.name || item.group === "Все группы");
+}
+
+function renderMethods() {
+  const methods = visibleMethods();
+  return `
+    <div class="toolbar">
+      ${isAdmin() ? `<button class="button primary" data-add-method type="button">+ Урок / методика</button>` : ""}
+      <span class="badge neutral">${isAdmin() ? "банк уроков" : "мои уроки"}</span>
+    </div>
+    <div class="method-grid">
+      ${
+        methods
+          .map(
+            (item) => `
+              <article class="card method-card">
+                <div class="card-header">
+                  <h3>${item.topic}</h3>
+                  <span class="badge neutral">${item.group}</span>
+                </div>
+                <div class="card-body list">
+                  <div class="list-row"><strong>Дата</strong><small>${item.lessonDate ? formatDate(item.lessonDate) : "без даты"}</small></div>
+                  <div class="list-row"><strong>Ментор</strong><small>${item.mentor || "любой"}</small></div>
+                  <p>${item.description || "Описание не добавлено"}</p>
+                  <div class="filters">
+                    ${item.link ? `<a class="button secondary compact" href="${item.link}" target="_blank" rel="noreferrer">Ссылка</a>` : ""}
+                    ${item.fileUrl ? `<a class="button ghost compact" href="${item.fileUrl}" target="_blank" rel="noreferrer">Файл</a>` : ""}
+                    ${isAdmin() ? `<button class="button danger compact" data-delete-method="${item.id}" type="button">Удалить</button>` : ""}
+                  </div>
+                </div>
+              </article>`,
+          )
+          .join("") || `<div class="empty">Методики появятся после загрузки админом</div>`
+      }
+    </div>
+  `;
+}
+
+function visibleSalaries() {
+  if (isAdmin()) return state.salaries || [];
+  return (state.salaries || []).filter((item) => item.mentor === currentUser?.name);
+}
+
+function renderSalary() {
+  const salaries = visibleSalaries();
+  const total = salaries.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  return `
+    <div class="toolbar">
+      ${isAdmin() ? `<button class="button primary" data-add-salary type="button">+ Выплата</button>` : ""}
+      <span class="badge neutral">${formatMoney(total)}</span>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Зарплаты менторов</h3><span class="badge neutral">${isAdmin() ? "редактирует админ" : "мои выплаты"}</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ментор</th><th>Период</th><th>Сумма</th><th>Дата оплаты</th><th>Статус</th><th>Комментарий</th><th>Действия</th></tr></thead>
+          <tbody>
+            ${
+              salaries
+                .map(
+                  (item) => `
+                    <tr>
+                      <td><strong>${item.mentor}</strong></td>
+                      <td>${item.period}</td>
+                      <td>${formatMoney(item.amount)}</td>
+                      <td>${item.payDate ? formatDate(item.payDate) : "не указана"}</td>
+                      <td><span class="badge ${item.status === "paid" ? "paid" : "soon"}">${item.status === "paid" ? "Оплачено" : "Ожидает"}</span></td>
+                      <td>${item.note || ""}</td>
+                      <td>${isAdmin() ? `<button class="button danger compact" data-delete-salary="${item.id}" type="button">Удалить</button>` : `<span class="badge neutral">просмотр</span>`}</td>
+                    </tr>`,
+                )
+                .join("") || `<tr><td colspan="7"><div class="empty">Выплат пока нет</div></td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
   `;
 }
 
@@ -1195,8 +1329,20 @@ function bindViewActions() {
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
+  document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
+  document.querySelector("[data-add-salary]")?.addEventListener("click", openSalaryModal);
+  document.querySelector("[data-add-method]")?.addEventListener("click", openMethodModal);
   document.querySelectorAll("[data-task-status]").forEach((select) => {
     select.addEventListener("change", () => updateTaskStatus(Number(select.dataset.taskStatus), select.value));
+  });
+  document.querySelectorAll("[data-delete-schedule]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("schedule", Number(button.dataset.deleteSchedule)));
+  });
+  document.querySelectorAll("[data-delete-salary]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("salary", Number(button.dataset.deleteSalary)));
+  });
+  document.querySelectorAll("[data-delete-method]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("method", Number(button.dataset.deleteMethod)));
   });
   document.querySelectorAll("[data-add-lesson-check]").forEach((button) => {
     button.addEventListener("click", () => openLessonCheckModal(button.dataset.addLessonCheck || ""));
@@ -1417,6 +1563,123 @@ function openTaskModal() {
     closeModal();
     render();
   });
+}
+
+function mentorOptions(selected = "") {
+  return state.users
+    .filter((user) => user.role === "mentor")
+    .map((user) => `<option ${user.name === selected ? "selected" : ""}>${user.name}</option>`)
+    .join("");
+}
+
+function openScheduleModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Занятие в расписании",
+    `<form class="modal-form" id="scheduleForm">
+      <label>День<select name="day"><option>Пн</option><option>Вт</option><option>Ср</option><option>Чт</option><option>Пт</option><option>Сб</option><option>Вс</option></select></label>
+      <label>Время<input name="time" type="time" required /></label>
+      <label>Группа<input name="group" required placeholder="A1, NIS, 15 мкр" /></label>
+      <label>Ментор<select name="mentor">${mentorOptions()}</select></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#scheduleForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const lesson = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("create_schedule", lesson);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.schedule.push({ ...lesson, id: Date.now() });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openSalaryModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Выплата ментору",
+    `<form class="modal-form" id="salaryForm">
+      <label>Ментор<select name="mentor">${mentorOptions()}</select></label>
+      <label>Период<input name="period" required placeholder="Май 2026" /></label>
+      <label>Сумма<input name="amount" type="number" required placeholder="150000" /></label>
+      <label>Дата оплаты<input name="payDate" type="date" /></label>
+      <label>Статус<select name="status"><option value="pending">Ожидает</option><option value="paid">Оплачено</option></select></label>
+      <label style="grid-column:1/-1">Комментарий<textarea name="note" placeholder="За какие группы / часы / бонусы"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#salaryForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const salary = Object.fromEntries(new FormData(event.currentTarget).entries());
+    salary.amount = Number(salary.amount);
+    if (backendEnabled) {
+      await apiRequest("create_salary", salary);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.salaries.unshift({ ...salary, id: Date.now() });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openMethodModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Урок / методика",
+    `<form class="modal-form" id="methodForm">
+      <label>Тема урока<input name="topic" required placeholder="Датчики расстояния" /></label>
+      <label>Группа<input name="group" required placeholder="A1 или Все группы" /></label>
+      <label>Ментор<select name="mentor"><option>любой</option>${mentorOptions()}</select></label>
+      <label>Дата урока<input name="lessonDate" type="date" /></label>
+      <label>Ссылка<input name="link" type="url" placeholder="https://..." /></label>
+      <label>Файл / Drive<input name="fileUrl" type="url" placeholder="https://drive.google.com/..." /></label>
+      <label style="grid-column:1/-1">Описание<textarea name="description" placeholder="Цель, материалы, ход урока, домашнее задание"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Загрузить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#methodForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const method = Object.fromEntries(new FormData(event.currentTarget).entries());
+    method.mentor = method.mentor === "любой" ? "" : method.mentor;
+    if (backendEnabled) {
+      await apiRequest("create_method", method);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.methods.unshift({ ...method, id: Date.now() });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+async function deleteRecord(type, id) {
+  if (!isAdmin()) return;
+  if (!confirm("Удалить запись?")) return;
+  const map = {
+    schedule: ["delete_schedule", "schedule"],
+    salary: ["delete_salary", "salaries"],
+    method: ["delete_method", "methods"],
+  };
+  const [action, key] = map[type];
+  if (backendEnabled) {
+    await apiRequest(action, { id });
+    await refreshData();
+    return;
+  }
+  state[key] = state[key].filter((item) => Number(item.id) !== Number(id));
+  saveState();
+  render();
 }
 
 async function updateTaskStatus(taskId, status) {

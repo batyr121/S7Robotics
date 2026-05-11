@@ -42,6 +42,12 @@ try {
         'delete_student' => delete_student($pdo, require_admin($pdo), $input),
         'delete_user' => delete_user($pdo, require_admin($pdo), $input),
         'adjust_xp' => adjust_xp($pdo, require_admin($pdo), $input),
+        'create_schedule' => create_schedule($pdo, require_admin($pdo), $input),
+        'delete_schedule' => delete_simple($pdo, require_admin($pdo), $input, 'schedule'),
+        'create_salary' => create_salary($pdo, require_admin($pdo), $input),
+        'delete_salary' => delete_simple($pdo, require_admin($pdo), $input, 'salaries'),
+        'create_method' => create_method($pdo, require_admin($pdo), $input),
+        'delete_method' => delete_simple($pdo, require_admin($pdo), $input, 'methods'),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -144,6 +150,27 @@ function init_db(PDO $pdo): void
             reason text not null,
             date text not null,
             created_by text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists salaries (
+            id integer primary key autoincrement,
+            mentor text not null,
+            period text not null,
+            amount integer not null,
+            pay_date text,
+            status text not null default 'pending',
+            note text,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists methods (
+            id integer primary key autoincrement,
+            topic text not null,
+            group_name text not null,
+            mentor text,
+            lesson_date text,
+            link text,
+            file_url text,
+            description text,
             created_at text not null default current_timestamp
         );
     ");
@@ -403,6 +430,56 @@ function adjust_xp(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function create_schedule(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into schedule (day, group_name, time, mentor) values (?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'day'),
+        required($input, 'group'),
+        required($input, 'time'),
+        required($input, 'mentor'),
+    ]);
+    data_response($pdo, $admin);
+}
+
+function create_salary(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into salaries (mentor, period, amount, pay_date, status, note) values (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'mentor'),
+        required($input, 'period'),
+        (int)required($input, 'amount'),
+        $input['payDate'] ?? '',
+        $input['status'] ?? 'pending',
+        $input['note'] ?? '',
+    ]);
+    data_response($pdo, $admin);
+}
+
+function create_method(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into methods (topic, group_name, mentor, lesson_date, link, file_url, description) values (?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'topic'),
+        required($input, 'group'),
+        $input['mentor'] ?? '',
+        $input['lessonDate'] ?? '',
+        $input['link'] ?? '',
+        $input['fileUrl'] ?? '',
+        $input['description'] ?? '',
+    ]);
+    data_response($pdo, $admin);
+}
+
+function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
+{
+    $allowed = ['schedule', 'salaries', 'methods'];
+    if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
+    $stmt = $pdo->prepare("delete from $table where id = ?");
+    $stmt->execute([(int)required($input, 'id')]);
+    data_response($pdo, $admin);
+}
+
 function data_response(PDO $pdo, array $user): void
 {
     respond(['user' => public_user($user), 'state' => state_for_user($pdo, $user)]);
@@ -423,6 +500,8 @@ function state_for_user(PDO $pdo, array $user): array
         'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : mentor_lesson_checks($pdo, $user),
         'tasks' => $isAdmin ? all_tasks($pdo) : user_tasks($pdo, $user),
         'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : mentor_xp_adjustments($pdo, $user),
+        'salaries' => $isAdmin ? all_salaries($pdo) : mentor_salaries($pdo, $user),
+        'methods' => $isAdmin ? all_methods($pdo) : mentor_methods($pdo, $user),
     ];
 }
 
@@ -464,6 +543,39 @@ function mentor_schedule(PDO $pdo, array $user): array
     $stmt = $pdo->prepare("select * from schedule where group_name in ($placeholders) or mentor = ? order by id asc");
     $stmt->execute([...$groups, $user['name']]);
     return array_map('schedule_row', $stmt->fetchAll());
+}
+
+function all_salaries(PDO $pdo): array
+{
+    return array_map('salary_row', $pdo->query('select * from salaries order by pay_date desc, id desc')->fetchAll());
+}
+
+function mentor_salaries(PDO $pdo, array $user): array
+{
+    $stmt = $pdo->prepare('select * from salaries where mentor = ? order by pay_date desc, id desc');
+    $stmt->execute([$user['name']]);
+    return array_map('salary_row', $stmt->fetchAll());
+}
+
+function all_methods(PDO $pdo): array
+{
+    return array_map('method_row', $pdo->query('select * from methods order by lesson_date desc, id desc')->fetchAll());
+}
+
+function mentor_methods(PDO $pdo, array $user): array
+{
+    $groups = user_groups($user);
+    $placeholders = $groups ? implode(',', array_fill(0, count($groups), '?')) : "''";
+    $sql = "select * from methods where group_name = 'Все группы' or mentor = ?";
+    $params = [$user['name']];
+    if ($groups) {
+        $sql .= " or group_name in ($placeholders)";
+        $params = [...$params, ...$groups];
+    }
+    $sql .= ' order by lesson_date desc, id desc';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return array_map('method_row', $stmt->fetchAll());
 }
 
 function all_lesson_checks(PDO $pdo): array
@@ -706,6 +818,33 @@ function task_row(array $row): array
         'status' => $row['status'],
         'dueDate' => $row['due_date'] ?? '',
         'createdBy' => $row['created_by'],
+    ];
+}
+
+function salary_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'mentor' => $row['mentor'],
+        'period' => $row['period'],
+        'amount' => (int)$row['amount'],
+        'payDate' => $row['pay_date'] ?? '',
+        'status' => $row['status'],
+        'note' => $row['note'] ?? '',
+    ];
+}
+
+function method_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'topic' => $row['topic'],
+        'group' => $row['group_name'],
+        'mentor' => $row['mentor'] ?? '',
+        'lessonDate' => $row['lesson_date'] ?? '',
+        'link' => $row['link'] ?? '',
+        'fileUrl' => $row['file_url'] ?? '',
+        'description' => $row['description'] ?? '',
     ];
 }
 
