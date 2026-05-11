@@ -12,6 +12,7 @@ if (!is_dir($dataDir)) {
 $pdo = new PDO('sqlite:' . $dataDir . '/crm.sqlite');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$pdo->exec('pragma busy_timeout = 5000');
 
 init_db($pdo);
 
@@ -206,11 +207,13 @@ function migrate_users_role_check(PDO $pdo): void
     $stmt = $pdo->prepare("select sql from sqlite_master where type = 'table' and name = 'users'");
     $stmt->execute();
     $sql = (string)$stmt->fetchColumn();
+    $stmt->closeCursor();
     if (str_contains($sql, "'parent'")) {
         return;
     }
     $pdo->exec('pragma foreign_keys = off');
     $pdo->exec("
+        drop table if exists users_new;
         create table users_new (
             id integer primary key autoincrement,
             name text not null,
