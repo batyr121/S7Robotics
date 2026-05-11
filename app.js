@@ -35,6 +35,7 @@ const appShell = document.querySelector(".app-shell");
 const authScreen = document.querySelector("#authScreen");
 const appView = document.querySelector("#appView");
 const pageTitle = document.querySelector("#pageTitle");
+const heroBand = document.querySelector(".hero-band");
 const modalRoot = document.querySelector("#modalRoot");
 const globalSearch = document.querySelector("#globalSearch");
 const currentUserName = document.querySelector("#currentUserName");
@@ -464,6 +465,7 @@ function renderShell() {
   if (!currentUser) {
     authScreen.hidden = false;
     appShell.hidden = true;
+    if (heroBand) heroBand.hidden = false;
     updateAuthMode();
     return;
   }
@@ -476,6 +478,7 @@ function renderShell() {
     : isParent()
       ? `Родитель · ${visibleStudents().length} детей`
       : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
+  if (heroBand) heroBand.hidden = isParent();
   if (!canUse(activeView)) activeView = "dashboard";
   updatePageTitle();
   syncNavigation();
@@ -569,6 +572,7 @@ function updateToday() {
 }
 
 function renderDashboard() {
+  if (isParent()) return renderParentDashboard();
   const students = visibleStudents();
   const payments = isAdmin() ? state.payments : visiblePayments();
   const attendance = visibleAttendance();
@@ -655,13 +659,45 @@ function renderDashboard() {
   `;
 }
 
+function renderParentDashboard() {
+  return `
+    <div class="parent-overview">
+      <article class="card branch-map-card">
+        <div class="card-header">
+          <h3>Карта S7 Robotics в Мангистау</h3>
+          <span class="badge neutral">семейный обзор</span>
+        </div>
+        <div class="map-layout parent-map-layout">
+          ${mangystauMap()}
+          <div class="branch-list">
+            ${branchRow("15 мкр, 70 здание", "Основная площадка", "active")}
+            ${branchRow("19 мкр, 23/1", "Площадка S7 Robotics", "active")}
+            ${branchRow("32 ЖББМ", "Школьная группа", "soon")}
+            ${branchRow("ТОО Tanym School", "Партнерская площадка", "neutral")}
+            ${branchRow("АОО NIS", "Партнерская площадка", "neutral")}
+          </div>
+        </div>
+      </article>
+      <article class="card parent-news-card">
+        <div class="card-header">
+          <h3>Новости центра</h3>
+          <span class="badge active">${(state.announcements || []).length || "live"}</span>
+        </div>
+        <div class="card-body list">
+          ${announcementList()}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
 function dashboardLanding(totalStudents, activeStudents, visits) {
   return `
     <section class="landing-dashboard">
       <div class="landing-copy">
         <span class="landing-kicker">S7 Robotics Mangystau</span>
-        <h2>Образовательная экосистема робототехники для детей и подростков.</h2>
-        <p>Центр, где ученики собирают роботов, пишут код, готовятся к соревнованиям и получают понятную траекторию развития.</p>
+        <h2>Журнал центра: группы, уроки и оплата без лишнего шума.</h2>
+        <p>Здесь видно, кто сегодня пришел, где нужна оплата, какие темы прошли и как движется каждая группа.</p>
         <div class="landing-actions">
           <button class="button primary" data-view-jump="students" type="button">Ученики</button>
           <button class="button secondary" data-view-jump="attendance" type="button">Табель</button>
@@ -758,17 +794,47 @@ function stat(label, value, hint) {
 }
 
 function studentProgressRow(student) {
+  const program = programProgress(student);
   return `
     <div class="list-row">
       <div>
         <strong>${student.name}</strong>
-        <small>${student.course} · ${student.group}</small>
+        <small>${program.title} · ${student.group}</small>
       </div>
       <div class="progress-cell">
-        <div class="progress"><span style="width:${student.progress}%"></span></div>
-        <small>${student.progress}%</small>
+        <div class="progress"><span style="width:${program.percent}%"></span></div>
+        <small>${program.completed}/${program.total}</small>
       </div>
     </div>`;
+}
+
+function programTrack(student) {
+  const raw = `${student.course || ""} ${student.group || ""}`.toLowerCase();
+  if (/программа\s*b|program\s*b|(^|\s)b(\s|$)|advanced|senior/.test(raw)) {
+    return "B";
+  }
+  return "A";
+}
+
+function programTitle(track) {
+  return track === "B" ? "Программа B" : "Программа A";
+}
+
+function programProgress(student) {
+  const total = 34;
+  const completed = Math.min(total, studentPresentAttendance(student.id).length);
+  const percent = Math.round((completed / total) * 100);
+  const track = programTrack(student);
+  const nextLesson = Math.min(total, completed + 1);
+  return {
+    track,
+    title: programTitle(track),
+    total,
+    completed,
+    percent,
+    nextLesson,
+    remaining: Math.max(0, total - completed),
+  };
 }
 
 function renderStudents() {
@@ -804,7 +870,7 @@ function renderStudents() {
                     return `
                   <tr>
                     <td><strong>${student.name}</strong><small>${student.group} · ${student.phone}</small></td>
-                    <td>${student.course}<small>Прогресс ${student.progress}%</small></td>
+                    <td>${programProgress(student).title}<small>${programProgress(student).completed}/34 уроков</small></td>
                     <td>${student.parent}</td>
                     <td>${student.mentor}</td>
                     <td>
@@ -1047,7 +1113,7 @@ function renderParentPortal() {
       <article class="card">
         <div class="card-header"><h3>Новости и скидки</h3><span class="badge active">${(state.announcements || []).length}</span></div>
         <div class="card-body list">
-          ${(state.announcements || []).map((item) => announcementRow(item)).join("") || defaultAnnouncements()}
+          ${announcementList()}
         </div>
       </article>
       <article class="card">
@@ -1076,6 +1142,7 @@ function renderParentPortal() {
 function parentStudentCard(student) {
   const sub = subscriptionStatus(student);
   const stats = childGamification(student);
+  const program = programProgress(student);
   const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 5);
   const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 3);
   return `
@@ -1087,7 +1154,18 @@ function parentStudentCard(student) {
       <div class="profile-summary">
         ${stat("Абонемент", `${sub.remaining}/8`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
         ${stat("Уровень", stats.level, `${stats.xp} XP`)}
-        ${stat("Серия", `${stats.streak}`, "посещений подряд")}
+        ${stat(program.title, `${program.completed}/${program.total}`, `следующий урок ${program.nextLesson}`)}
+      </div>
+      <div class="program-panel">
+        <div>
+          <strong>${program.title}</strong>
+          <small>${program.remaining ? `Осталось ${program.remaining} уроков` : "Программа закрыта"}</small>
+        </div>
+        <div class="program-track" aria-label="Прогресс программы">
+          ${Array.from({ length: 34 }, (_, index) => `<span class="${index < program.completed ? "done" : index === program.completed ? "current" : ""}"></span>`).join("")}
+        </div>
+        <div class="progress"><span style="width:${program.percent}%"></span></div>
+        <small>${program.percent}% учебного пути</small>
       </div>
       <div class="gamification-grid">
         <section>
@@ -1115,17 +1193,18 @@ function childGamification(student) {
   const xp = attendance.length * 20 + feedback.length * 15 + reviews.length * 25 + Number(student.progress || 0);
   const level = Math.min(10, Math.max(1, Math.floor(xp / 100) + 1));
   const streak = attendance.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).length;
+  const program = programProgress(student);
   const missions = [
     dailyTask("Посетить урок", attendance.length > 0, `${attendance.length} посещений`),
     dailyTask("Получить фидбек", feedback.length > 0, `${feedback.length} заметок ментора`),
     dailyTask("Оставить отзыв", reviews.length > 0, `${reviews.length} отзывов семьи`),
-    dailyTask("Дойти до 7/8", subscriptionStatus(student).used >= 7, "контроль абонемента"),
+    dailyTask("Закрыть модуль", program.completed >= 8, `${program.completed}/${program.total} уроков`),
   ];
   const achievements = [
     achievement("Первый робот", attendance.length >= 1, "посетить первый урок"),
-    achievement("Стабильный инженер", attendance.length >= 4, "4 посещения"),
+    achievement("Стабильный инженер", attendance.length >= 4, "4 урока в программе"),
     achievement("Команда с семьей", reviews.length >= 3, "3 отзыва после уроков"),
-    achievement("Season Explorer", level >= 5, "дойти до 5 уровня"),
+    achievement("Половина пути", program.completed >= 17, "17 из 34 уроков"),
   ];
   return { xp, level, streak, missions, achievements };
 }
@@ -1144,11 +1223,16 @@ function announcementRow(item) {
     </div>`;
 }
 
+function announcementList() {
+  const items = (state.announcements || []).filter((item) => !item.expiresAt || new Date(item.expiresAt) >= new Date(new Date().toISOString().slice(0, 10)));
+  return items.map((item) => announcementRow(item)).join("") || defaultAnnouncements();
+}
+
 function defaultAnnouncements() {
   return `
-    ${announcementRow({ title: "Семейный бонус", kind: "discount", text: "За активные отзывы можно получать скидки на абонементы.", expiresAt: "" })}
-    ${announcementRow({ title: "3D Print Time", kind: "bonus", text: "Ученики с высоким уровнем открывают бесплатное время на 3D-принтере.", expiresAt: "" })}
-    ${announcementRow({ title: "Мастер-классы", kind: "news", text: "Лучшие проекты сезона попадут на закрытые занятия с мастерами центра.", expiresAt: "" })}
+    ${announcementRow({ title: "Семейный бонус", kind: "discount", text: "За активные отзывы семья получает дополнительные бонусы в сезонном пропуске.", expiresAt: "" })}
+    ${announcementRow({ title: "3D-печать для проектов", kind: "bonus", text: "Ученики с высоким прогрессом открывают бесплатное время на 3D-принтере.", expiresAt: "" })}
+    ${announcementRow({ title: "Открытые мастер-классы", kind: "news", text: "Лучшие проекты сезона попадут на занятия с мастерами центра.", expiresAt: "" })}
   `;
 }
 

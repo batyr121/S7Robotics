@@ -912,8 +912,66 @@ select {
   margin-top: 14px;
 }
 
+.parent-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 14px;
+}
+
+.parent-map-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.parent-news-card .list-row {
+  align-items: start;
+  background: #fbfdff;
+}
+
 .parent-child-card .profile-summary {
   padding: 0 18px 14px;
+}
+
+.program-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 18px 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, #ffffff, #f7fbff);
+}
+
+.program-panel strong,
+.program-panel small {
+  display: block;
+}
+
+.program-panel small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.program-track {
+  display: grid;
+  grid-template-columns: repeat(17, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.program-track span {
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 3px;
+  background: #dfe9f6;
+}
+
+.program-track span.done {
+  background: var(--blue-600);
+}
+
+.program-track span.current {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(243, 180, 53, 0.18);
 }
 
 .parent-review {
@@ -1689,7 +1747,8 @@ td small {
   .module-grid,
   .kanban,
   .profile-sections,
-  .quality-layout {
+  .quality-layout,
+  .parent-overview {
     grid-template-columns: 1fr;
   }
 
@@ -1761,6 +1820,7 @@ td small {
   .task-board,
   .method-grid,
   .parent-grid,
+  .parent-overview,
   .season-pass,
   .group-analytics,
   .attendance-grid,
