@@ -194,7 +194,7 @@ button {
 }
 
 .brand-logo {
-  width: 116px;
+  width: 96px;
   height: auto;
   display: block;
   flex: 0 0 auto;
@@ -205,7 +205,7 @@ button {
 }
 
 .auth-brand .brand-logo {
-  width: 132px;
+  width: 112px;
   padding: 0;
   background: transparent;
   box-shadow: none;
@@ -1172,6 +1172,38 @@ td small {
   color: var(--muted);
 }
 
+.group-analytics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.group-analytic {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.group-analytic strong,
+.group-analytic span,
+.group-analytic small {
+  display: block;
+}
+
+.group-analytic span,
+.group-analytic small {
+  color: var(--muted);
+}
+
+.group-analytic .risk,
+.payment-alert {
+  color: #b02c3b;
+  font-weight: 800;
+}
+
 .progress {
   height: 9px;
   overflow: hidden;
@@ -1567,13 +1599,17 @@ td small {
   }
 
   .brand-logo {
-    width: 72px;
+    width: 62px;
     padding: 5px;
   }
 
   .stats-grid,
   .team-grid,
   .task-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .group-analytics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1609,7 +1645,7 @@ td small {
   }
 
   .brand-logo {
-    width: 96px;
+    width: 82px;
   }
 
   .nav {
@@ -1649,6 +1685,7 @@ td small {
   .stats-grid,
   .team-grid,
   .task-board,
+  .group-analytics,
   .attendance-grid,
   .profile-summary {
     grid-template-columns: 1fr;

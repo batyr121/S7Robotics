@@ -203,6 +203,94 @@ function byId(id) {
   return state.students.find((student) => student.id === Number(id));
 }
 
+function studentPayments(studentId) {
+  return (state.payments || [])
+    .filter((payment) => Number(payment.studentId) === Number(studentId) && payment.status === "paid")
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function studentPresentAttendance(studentId) {
+  return (state.attendance || [])
+    .filter((item) => Number(item.studentId) === Number(studentId) && item.status === "present")
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function subscriptionStatus(student) {
+  const lastPayment = studentPayments(student.id)[0];
+  const startDate = lastPayment?.date || student.nextPayment || null;
+  const visits = startDate
+    ? studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))
+    : studentPresentAttendance(student.id);
+  const used = Math.min(visits.length, 8);
+  const remaining = Math.max(0, 8 - used);
+  const nextPaymentDate = estimateNextPaymentDate(student, startDate, used);
+  const needsPayment = used >= 7;
+  const expired = used >= 8;
+  return {
+    startDate,
+    used,
+    remaining,
+    visitLabel: `${used}/8`,
+    needsPayment,
+    expired,
+    nextPaymentDate,
+    lastPayment,
+  };
+}
+
+function estimateNextPaymentDate(student, startDate, used) {
+  if (!startDate) return student.nextPayment || "";
+  if (used >= 7) {
+    const seventhVisit = studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))[6];
+    if (seventhVisit) return seventhVisit.date;
+  }
+  const lessonDays = groupLessonDays(student.group);
+  let count = 0;
+  const cursor = new Date(startDate);
+  for (let i = 0; i < 120; i += 1) {
+    if (lessonDays.has(cursor.getDay())) {
+      count += 1;
+      if (count === 7) return cursor.toISOString().slice(0, 10);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return student.nextPayment || startDate;
+}
+
+function groupLessonDays(group) {
+  const map = new Map([
+    ["Вс", 0],
+    ["Пн", 1],
+    ["Вт", 2],
+    ["Ср", 3],
+    ["Чт", 4],
+    ["Пт", 5],
+    ["Сб", 6],
+  ]);
+  const days = new Set(
+    (state.schedule || [])
+      .filter((lesson) => lesson.group === group)
+      .map((lesson) => map.get(lesson.day))
+      .filter((day) => day !== undefined),
+  );
+  if (!days.size) {
+    days.add(6);
+    days.add(0);
+  }
+  return days;
+}
+
+function groupAnalytics() {
+  return uniqueGroups().map((group) => {
+    const students = visibleStudents().filter((student) => student.group === group);
+    const risks = students.filter((student) => subscriptionStatus(student).needsPayment).length;
+    const avgProgress = students.length
+      ? Math.round(students.reduce((sum, student) => sum + Number(student.progress || 0), 0) / students.length)
+      : 0;
+    return { group, students: students.length, risks, avgProgress };
+  });
+}
+
 function uniqueGroups() {
   return [...new Set(visibleStudents().map((student) => student.group))].sort();
 }
@@ -219,13 +307,14 @@ function crmTasks() {
   const students = visibleStudents();
   const tasks = [];
   students
-    .filter((student) => student.lessonsLeft <= 2)
+    .filter((student) => subscriptionStatus(student).needsPayment || student.lessonsLeft <= 2)
     .forEach((student) => {
+      const sub = subscriptionStatus(student);
       tasks.push({
-        title: `${student.name}: осталось ${student.lessonsLeft} занятий`,
-        hint: isAdmin() ? "Проверить продление абонемента" : "Сообщить админу о продлении",
+        title: `${student.name}: ${sub.visitLabel} посещений`,
+        hint: sub.expired ? "Абонемент закончился" : `Оплата на ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "7 посещении"}`,
         view: isAdmin() ? "payments" : "students",
-        tone: student.lessonsLeft === 0 ? "overdue" : "soon",
+        tone: sub.expired ? "overdue" : "soon",
       });
     });
   students
@@ -487,6 +576,25 @@ function renderDashboard() {
       </div>
     </article>
     <article class="card">
+      <div class="card-header"><h3>Аналитика групп</h3><span class="badge neutral">${groupAnalytics().length} групп</span></div>
+      <div class="card-body group-analytics">
+        ${
+          groupAnalytics()
+            .map(
+              (item) => `
+                <div class="group-analytic">
+                  <strong>${item.group}</strong>
+                  <span>${item.students} учеников</span>
+                  <span class="${item.risks ? "risk" : ""}">${item.risks} оплат к контролю</span>
+                  <div class="progress"><span style="width:${item.avgProgress}%"></span></div>
+                  <small>прогресс ${item.avgProgress}%</small>
+                </div>`,
+            )
+            .join("") || `<div class="empty">Группы появятся после добавления учеников</div>`
+        }
+      </div>
+    </article>
+    <article class="card">
       <div class="card-header"><h3>Расписание</h3><span class="badge neutral">${isAdmin() ? "все группы" : "мои группы"}</span></div>
       <div class="card-body attendance-grid">${scheduleCells()}</div>
     </article>
@@ -637,20 +745,28 @@ function renderStudents() {
             ${students
               .map(
                 (student) => `
+                  ${(() => {
+                    const sub = subscriptionStatus(student);
+                    return `
                   <tr>
                     <td><strong>${student.name}</strong><small>${student.group} · ${student.phone}</small></td>
                     <td>${student.course}<small>Прогресс ${student.progress}%</small></td>
                     <td>${student.parent}</td>
                     <td>${student.mentor}</td>
-                    <td>${student.lessonsLeft} занятий<small>${isAdmin() ? `оплата ${formatDate(student.nextPayment)}` : "детали у админа"}</small></td>
-                    <td><span class="badge ${student.status}">${statusText[student.status]}</span></td>
+                    <td>
+                      <strong>${sub.visitLabel}</strong>
+                      <small>${sub.startDate ? `с ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
+                      <small>${isAdmin() ? `оплата ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана"}` : "детали у админа"}</small>
+                    </td>
+                    <td><span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : student.status}">${sub.expired ? "Нужна оплата" : sub.needsPayment ? "7-е посещение" : statusText[student.status]}</span></td>
                     <td>
                       <div class="row-actions">
                         <button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button>
                         ${isAdmin() ? `<button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>` : ""}
                       </div>
                     </td>
-                  </tr>`,
+                  </tr>`;
+                  })()}`,
               )
               .join("") || `<tr><td colspan="7"><div class="empty">Ничего не найдено</div></td></tr>`}
           </tbody>
@@ -703,12 +819,13 @@ function renderAttendance() {
                 .map((student) => {
                   const rowRecords = records.filter((item) => Number(item.studentId) === Number(student.id));
                   const presentCount = rowRecords.filter((item) => item.status === "present").length;
+                  const sub = subscriptionStatus(student);
                   return `
                     <tr>
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
                       ${dates.map((date) => attendanceCell(student.id, date, records)).join("")}
-                      <td><strong>${presentCount}/${dates.length}</strong><small>посещений</small></td>
+                      <td><strong>${sub.visitLabel}</strong><small>${sub.needsPayment ? "пора на оплату" : `${presentCount}/${dates.length} в табеле`}</small></td>
                     </tr>`;
                 })
                 .join("") || `<tr><td colspan="${dates.length + 3}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
@@ -767,11 +884,13 @@ function renderPayments() {
 
 function paymentRow(payment) {
   const student = byId(payment.studentId);
+  const sub = student ? subscriptionStatus(student) : null;
   return `
     <div class="list-row">
       <div>
         <strong>${student?.name ?? "Удаленный ученик"}</strong>
-        <small>${payment.plan} · ${formatDate(payment.date)}</small>
+        <small>${payment.plan} · ${formatDate(payment.date)}${sub ? ` · ${sub.visitLabel}` : ""}</small>
+        ${sub?.needsPayment ? `<small class="payment-alert">следующая оплата: ${formatDate(sub.nextPaymentDate)}</small>` : ""}
       </div>
       <div>
         <strong>${formatMoney(payment.amount)}</strong>
@@ -1137,14 +1256,15 @@ function openStudentProfile(studentId) {
   const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(studentId));
   const payments = isAdmin() ? state.payments.filter((item) => Number(item.studentId) === Number(studentId)) : [];
   const present = attendance.filter((item) => item.status === "present").length;
+  const sub = subscriptionStatus(student);
   openModal(
     student.name,
     `<div class="profile-modal">
       <div class="profile-summary">
         ${stat("Группа", student.group, student.course)}
-        ${stat("Посещаемость", `${present}/${attendance.length || 0}`, "по отметкам")}
+        ${stat("Абонемент", sub.visitLabel, sub.startDate ? `с ${formatDate(sub.startDate)}` : "нет оплаты")}
         ${stat("Прогресс", `${student.progress}%`, "текущий уровень")}
-        ${stat("Занятий", student.lessonsLeft, "осталось")}
+        ${stat("Оплата", sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана", sub.needsPayment ? "пора напомнить" : "по графику")}
       </div>
       <div class="module-grid profile-sections">
         <section class="card">
@@ -1564,6 +1684,11 @@ function openPaymentModal(selectedStudentId = null) {
       ...payload,
       id: Date.now(),
     });
+    const student = state.students.find((item) => Number(item.id) === Number(payload.studentId));
+    if (student) {
+      student.lessonsLeft = 8;
+      student.nextPayment = payload.date;
+    }
     saveState();
     closeModal();
     render();

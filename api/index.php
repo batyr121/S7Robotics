@@ -215,14 +215,20 @@ function create_student(PDO $pdo, array $admin, array $input): void
 
 function create_payment(PDO $pdo, array $admin, array $input): void
 {
+    $studentId = (int)required($input, 'studentId');
+    $date = required($input, 'date');
     $stmt = $pdo->prepare('insert into payments (student_id, plan, amount, status, date) values (?, ?, ?, ?, ?)');
     $stmt->execute([
-        (int)required($input, 'studentId'),
+        $studentId,
         required($input, 'plan'),
         (int)required($input, 'amount'),
         $input['status'] ?? 'paid',
-        required($input, 'date'),
+        $date,
     ]);
+    if (($input['status'] ?? 'paid') === 'paid') {
+        $stmt = $pdo->prepare('update students set lessons_left = 8, next_payment = ? where id = ?');
+        $stmt->execute([$date, $studentId]);
+    }
     data_response($pdo, $admin);
 }
 
