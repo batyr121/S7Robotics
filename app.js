@@ -15,6 +15,8 @@ const seed = {
   xpAdjustments: [],
   salaries: [],
   methods: [],
+  parentReviews: [],
+  announcements: [],
 };
 
 const statusText = {
@@ -69,6 +71,8 @@ function normalizeState(nextState) {
   nextState.xpAdjustments = nextState.xpAdjustments || [];
   nextState.salaries = nextState.salaries || [];
   nextState.methods = nextState.methods || [];
+  nextState.parentReviews = nextState.parentReviews || [];
+  nextState.announcements = nextState.announcements || [];
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
@@ -145,15 +149,24 @@ function isAdmin() {
   return currentUser?.role === "admin";
 }
 
+function isParent() {
+  return currentUser?.role === "parent";
+}
+
 function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
+  if (isParent()) return ["dashboard", "students", "attendance", "schedule", "feedback", "parent"].includes(view);
   return ["dashboard", "students", "attendance", "schedule", "feedback", "tasks", "methods", "salary", "team"].includes(view);
 }
 
 function visibleStudents() {
   if (!currentUser) return [];
   if (isAdmin()) return state.students;
+  if (isParent()) {
+    const ids = new Set((currentUser.groups || []).map((id) => Number(id)));
+    return state.students.filter((student) => ids.has(Number(student.id)));
+  }
   const groups = new Set(currentUser.groups || []);
   return state.students.filter((student) => groups.has(student.group) || student.mentor === currentUser.name);
 }
@@ -179,8 +192,17 @@ function visibleFeedback() {
 
 function visibleSchedule() {
   if (isAdmin()) return state.schedule;
+  if (isParent()) {
+    const groups = new Set(visibleStudents().map((student) => student.group));
+    return state.schedule.filter((lesson) => groups.has(lesson.group));
+  }
   const groups = new Set(currentUser?.groups || []);
   return state.schedule.filter((lesson) => groups.has(lesson.group) || lesson.mentor === currentUser?.name);
+}
+
+function visibleParentReviews() {
+  const ids = visibleStudentIds();
+  return (state.parentReviews || []).filter((review) => ids.has(Number(review.studentId)));
 }
 
 function filteredStudents() {
@@ -365,13 +387,16 @@ function mentorQualityStats(user = currentUser) {
   const userStudentIds = new Set(userStudents.map((student) => Number(student.id)));
   const userFeedback = (state.feedback || []).filter((note) => userStudentIds.has(Number(note.studentId)) || note.mentor === user?.name);
   const userAttendance = (state.attendance || []).filter((item) => userStudentIds.has(Number(item.studentId)));
+  const parentReviewXp = (state.parentReviews || [])
+    .filter((review) => review.mentor === user?.name || userStudentIds.has(Number(review.studentId)))
+    .reduce((sum, review) => sum + Number(review.bonusPoints || Number(review.rating || 0) * 10), 0);
   const manualXp = (state.xpAdjustments || [])
     .filter((item) => item.mentor === user?.name)
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const today = new Date().toISOString().slice(0, 10);
   const totalScore = checks.reduce((sum, check) => sum + Number(check.score || 0), 0);
   const avg = checks.length ? Math.round(totalScore / checks.length) : 0;
-  const xp = Math.max(0, totalScore + userFeedback.length * 15 + userAttendance.length * 3 + manualXp);
+  const xp = Math.max(0, totalScore + userFeedback.length * 15 + userAttendance.length * 3 + parentReviewXp + manualXp);
   const rank = mentorRank(xp, avg);
   const todayChecks = checks.filter((check) => check.date === today).length;
   const todayAttendance = userAttendance.filter((item) => item.date === today).length;
@@ -390,7 +415,7 @@ function mentorQualityStats(user = currentUser) {
     achievement("Фидбек-мастер", userFeedback.length >= Math.max(3, userStudents.length), "Фидбеков не меньше числа учеников"),
     achievement("Серия наставника", streak >= 3, "3 дня подряд с проверками"),
   ];
-  return { checks, avg, xp, manualXp, rank, tasks, achievements, next: rank.next, streak };
+  return { checks, avg, xp, manualXp, parentReviewXp, rank, tasks, achievements, next: rank.next, streak };
 }
 
 function mentorRank(xp, avg) {
@@ -446,7 +471,11 @@ function renderShell() {
   authScreen.hidden = true;
   appShell.hidden = false;
   currentUserName.textContent = currentUser.name;
-  currentUserRole.textContent = isAdmin() ? "Админ" : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
+  currentUserRole.textContent = isAdmin()
+    ? "Админ"
+    : isParent()
+      ? `Родитель · ${visibleStudents().length} детей`
+      : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
   if (!canUse(activeView)) activeView = "dashboard";
   updatePageTitle();
   syncNavigation();
@@ -502,6 +531,7 @@ function updatePageTitle() {
     schedule: "Расписание",
     payments: "Абонементы",
     feedback: "Фидбек",
+    parent: "Семья",
     tasks: "Задачи",
     methods: "Методика",
     salary: "Зарплаты",
@@ -517,6 +547,7 @@ function render() {
     schedule: renderSchedule,
     payments: renderPayments,
     feedback: renderFeedback,
+    parent: renderParentPortal,
     tasks: renderTasks,
     methods: renderMethods,
     salary: renderSalary,
@@ -811,7 +842,7 @@ function renderAttendance() {
   return `
     <div class="toolbar">
       <div class="filters">
-        <button class="button primary" data-add-attendance type="button">+ Отметка</button>
+        ${!isParent() ? `<button class="button primary" data-add-attendance type="button">+ Отметка</button>` : ""}
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
         <label class="inline-filter">Группа
           <select id="attendanceGroupFilter">
@@ -820,7 +851,7 @@ function renderAttendance() {
           </select>
         </label>
       </div>
-      <span class="badge neutral">${isAdmin() ? "админ видит все группы" : "только мои группы"}</span>
+      <span class="badge neutral">${isAdmin() ? "админ видит все группы" : isParent() ? "только дети родителя" : "только мои группы"}</span>
     </div>
     <article class="card">
       <div class="card-header">
@@ -908,10 +939,13 @@ function attendanceDates(studentIds = visibleStudentIds()) {
 
 function attendanceCell(studentId, date, records) {
   const record = records.find((item) => Number(item.studentId) === Number(studentId) && item.date === date);
+  const tag = (className, text, title = "") => `<span class="mark ${className}" title="${title}">${text}</span>`;
   if (!record) {
+    if (isParent()) return `<td>${tag("missed", "-")}</td>`;
     return `<td><button class="mark missed" data-toggle-attendance="${studentId}:${date}" title="Поставить был" type="button">-</button></td>`;
   }
   const mark = record.status === "present" ? "Б" : "Н";
+  if (isParent()) return `<td>${tag(record.status, mark, record.topic)}<small>${record.topic}</small></td>`;
   return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${date}" title="${record.topic}" type="button">${mark}</button><small>${record.topic}</small></td>`;
 }
 
@@ -959,10 +993,12 @@ function paymentRow(payment) {
 
 function renderFeedback() {
   const notes = visibleFeedback();
+  const reviews = isAdmin() ? state.parentReviews || [] : visibleParentReviews();
   return `
     <div class="toolbar">
-      <button class="button primary" data-add-feedback type="button">+ Фидбек</button>
+      ${isParent() ? `<button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>` : `<button class="button primary" data-add-feedback type="button">+ Фидбек</button>`}
       <span class="badge neutral">${notes.length} заметок</span>
+      ${reviews.length ? `<span class="badge active">${reviews.length} отзывов родителей</span>` : ""}
     </div>
     <div class="kanban">
       ${filteredStudents()
@@ -984,12 +1020,156 @@ function renderFeedback() {
                     )
                     .join("") || `<div class="empty">Пока нет фидбека</div>`
                 }
+                ${
+                  reviews
+                    .filter((review) => Number(review.studentId) === Number(student.id))
+                    .map((review) => parentReviewCard(review))
+                    .join("")
+                }
               </div>
             </section>`;
         })
         .join("")}
     </div>
   `;
+}
+
+function renderParentPortal() {
+  const students = visibleStudents();
+  const reviews = visibleParentReviews();
+  return `
+    <div class="toolbar">
+      <button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>
+      ${isAdmin() ? `<button class="button secondary" data-add-announcement type="button">+ Новость / скидка</button>` : ""}
+      <span class="badge neutral">семейный кабинет</span>
+    </div>
+    <div class="module-grid">
+      <article class="card">
+        <div class="card-header"><h3>Новости и скидки</h3><span class="badge active">${(state.announcements || []).length}</span></div>
+        <div class="card-body list">
+          ${(state.announcements || []).map((item) => announcementRow(item)).join("") || defaultAnnouncements()}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Бонусы за отзывы</h3><span class="badge active">${reviews.reduce((sum, item) => sum + Number(item.bonusPoints || 0), 0)} XP</span></div>
+        <div class="card-body list">
+          ${reviews.map((review) => parentReviewCard(review)).join("") || `<div class="empty">После урока оставьте отзыв, он усилит уровень ментора и даст бонусы ребенку.</div>`}
+        </div>
+      </article>
+    </div>
+    <div class="parent-grid">
+      ${students.map((student) => parentStudentCard(student)).join("") || `<div class="empty">Админ еще не привязал детей к аккаунту родителя.</div>`}
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">Season Pass</span></div>
+      <div class="season-pass">
+        ${seasonReward(1, "5% скидка", "на следующий абонемент")}
+        ${seasonReward(2, "3D принтер", "30 минут печати бесплатно")}
+        ${seasonReward(3, "Мастер-класс", "закрытый воркшоп по роботам")}
+        ${seasonReward(4, "Консультация", "разбор проекта с мастером")}
+        ${seasonReward(5, "10% скидка", "на абонемент или лагерь")}
+      </div>
+    </article>
+  `;
+}
+
+function parentStudentCard(student) {
+  const sub = subscriptionStatus(student);
+  const stats = childGamification(student);
+  const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 5);
+  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 3);
+  return `
+    <article class="card parent-child-card">
+      <div class="card-header">
+        <h3>${student.name}</h3>
+        <span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : "active"}">${sub.visitLabel}</span>
+      </div>
+      <div class="profile-summary">
+        ${stat("Абонемент", `${sub.remaining}/8`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
+        ${stat("Уровень", stats.level, `${stats.xp} XP`)}
+        ${stat("Серия", `${stats.streak}`, "посещений подряд")}
+      </div>
+      <div class="gamification-grid">
+        <section>
+          <h4>Миссии ученика</h4>
+          <div class="mission-list">${stats.missions.map((mission) => missionRow(mission)).join("")}</div>
+        </section>
+        <section>
+          <h4>Достижения</h4>
+          <div class="achievement-list">${stats.achievements.map((item) => achievementRow(item)).join("")}</div>
+        </section>
+      </div>
+      <div class="card-body list">
+        <strong>Последние уроки</strong>
+        ${attendance.map((item) => `<div class="list-row"><span>${formatDate(item.date)}</span><small>${statusText[item.status]} · ${item.topic}</small></div>`).join("") || `<div class="empty">Пока нет отметок</div>`}
+        <strong>Фидбек ментора</strong>
+        ${feedback.map((note) => `<div class="feedback-note"><strong>${note.skill}</strong><small>${note.mentor} · ${formatDate(note.date)}</small><p>${note.text}</p></div>`).join("") || `<div class="empty">Ментор еще не добавил фидбек</div>`}
+      </div>
+    </article>`;
+}
+
+function childGamification(student) {
+  const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id) && item.status === "present");
+  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id));
+  const reviews = visibleParentReviews().filter((item) => Number(item.studentId) === Number(student.id));
+  const xp = attendance.length * 20 + feedback.length * 15 + reviews.length * 25 + Number(student.progress || 0);
+  const level = Math.min(10, Math.max(1, Math.floor(xp / 100) + 1));
+  const streak = attendance.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).length;
+  const missions = [
+    dailyTask("Посетить урок", attendance.length > 0, `${attendance.length} посещений`),
+    dailyTask("Получить фидбек", feedback.length > 0, `${feedback.length} заметок ментора`),
+    dailyTask("Оставить отзыв", reviews.length > 0, `${reviews.length} отзывов семьи`),
+    dailyTask("Дойти до 7/8", subscriptionStatus(student).used >= 7, "контроль абонемента"),
+  ];
+  const achievements = [
+    achievement("Первый робот", attendance.length >= 1, "посетить первый урок"),
+    achievement("Стабильный инженер", attendance.length >= 4, "4 посещения"),
+    achievement("Команда с семьей", reviews.length >= 3, "3 отзыва после уроков"),
+    achievement("Season Explorer", level >= 5, "дойти до 5 уровня"),
+  ];
+  return { xp, level, streak, missions, achievements };
+}
+
+function announcementRow(item) {
+  const tone = item.kind === "discount" ? "soon" : item.kind === "bonus" ? "active" : "neutral";
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${item.title}</strong>
+        <small>${item.text}</small>
+        ${item.expiresAt ? `<small>до ${formatDate(item.expiresAt)}</small>` : ""}
+      </div>
+      <span class="badge ${tone}">${item.kind === "discount" ? "скидка" : item.kind === "bonus" ? "бонус" : "новость"}</span>
+      ${isAdmin() ? `<button class="button danger compact" data-delete-announcement="${item.id}" type="button">Удалить</button>` : ""}
+    </div>`;
+}
+
+function defaultAnnouncements() {
+  return `
+    ${announcementRow({ title: "Семейный бонус", kind: "discount", text: "За активные отзывы можно получать скидки на абонементы.", expiresAt: "" })}
+    ${announcementRow({ title: "3D Print Time", kind: "bonus", text: "Ученики с высоким уровнем открывают бесплатное время на 3D-принтере.", expiresAt: "" })}
+    ${announcementRow({ title: "Мастер-классы", kind: "news", text: "Лучшие проекты сезона попадут на закрытые занятия с мастерами центра.", expiresAt: "" })}
+  `;
+}
+
+function seasonReward(level, title, text) {
+  const bestLevel = Math.max(0, ...visibleStudents().map((student) => childGamification(student).level));
+  return `
+    <div class="season-reward ${bestLevel >= level * 2 ? "unlocked" : ""}">
+      <span>${level}</span>
+      <strong>${title}</strong>
+      <small>${text}</small>
+    </div>`;
+}
+
+function parentReviewCard(review) {
+  const student = byId(review.studentId);
+  return `
+    <article class="feedback-note parent-review">
+      <strong>${"★".repeat(review.rating)}${"☆".repeat(Math.max(0, 5 - review.rating))} · ${student?.name || "Ученик"}</strong>
+      <small>${review.mentor} · ${formatDate(review.date)} · +${review.bonusPoints || 0} XP</small>
+      <p>${review.text}</p>
+    </article>`;
 }
 
 function visibleMethods() {
@@ -1148,6 +1328,7 @@ function taskPriorityText(priority) {
 function renderTeam() {
   const users = isAdmin() ? state.users : [currentUser];
   const mentors = users.filter((user) => user.role === "mentor");
+  const roleLabel = { admin: "Администратор", mentor: "Ментор", parent: "Родитель" };
   return `
     ${
       isAdmin()
@@ -1161,15 +1342,19 @@ function renderTeam() {
       ${users
         .map(
           (user) => {
-            const count = user.role === "admin" ? state.students.length : state.students.filter((student) => user.groups.includes(student.group)).length;
+            const count = user.role === "admin"
+              ? state.students.length
+              : user.role === "parent"
+                ? state.students.filter((student) => (user.groups || []).map(Number).includes(Number(student.id))).length
+                : state.students.filter((student) => user.groups.includes(student.group)).length;
             return `
               <article class="card profile">
                 <div class="avatar">${user.name.split(" ").map((part) => part[0]).join("")}</div>
                 <h3>${user.name}</h3>
-                <p>${user.role === "admin" ? "Администратор" : "Ментор"}</p>
+                <p>${roleLabel[user.role] || user.role}</p>
                 <div class="mini-metrics">
-                  <span><strong>${user.role === "admin" ? "Все" : user.groups.length}</strong>группы</span>
-                  <span><strong>${count}</strong>учеников</span>
+                  <span><strong>${user.role === "admin" ? "Все" : user.groups.length}</strong>${user.role === "parent" ? "дети" : "группы"}</span>
+                  <span><strong>${count}</strong>${user.role === "parent" ? "детей" : "учеников"}</span>
                   <span><strong>${user.email}</strong>email</span>
                   <span><strong>${user.role}</strong>доступ</span>
                 </div>
@@ -1184,6 +1369,7 @@ function renderTeam() {
       <div class="card-body list">
         <div class="list-row"><strong>Админ</strong><small>Все ученики, группы, оплаты, табели, аккаунты и фидбек.</small></div>
         <div class="list-row"><strong>Ментор</strong><small>Только свои группы, отметки посещаемости, ученики и фидбек.</small></div>
+        <div class="list-row"><strong>Родитель</strong><small>Только привязанные дети, посещения, абонемент, новости, фидбек и отзывы по урокам.</small></div>
       </div>
     </article>
     ${mentors.map((mentor) => mentorGamificationCard(mentor)).join("") || `<div class="empty">Создайте аккаунт ментора, чтобы включить геймификацию</div>`}
@@ -1352,6 +1538,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-method]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("method", Number(button.dataset.deleteMethod)));
   });
+  document.querySelectorAll("[data-delete-announcement]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("announcement", Number(button.dataset.deleteAnnouncement)));
+  });
   document.querySelectorAll("[data-add-lesson-check]").forEach((button) => {
     button.addEventListener("click", () => openLessonCheckModal(button.dataset.addLessonCheck || ""));
   });
@@ -1364,6 +1553,8 @@ function bindViewActions() {
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
+  document.querySelector("[data-add-parent-review]")?.addEventListener("click", () => openParentReviewModal());
+  document.querySelector("[data-add-announcement]")?.addEventListener("click", () => openAnnouncementModal());
   document.querySelector("[data-export-attendance]")?.addEventListener("click", exportAttendanceCsv);
   document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
   document.querySelector("#attendanceGroupFilter")?.addEventListener("change", (event) => {
@@ -1431,10 +1622,11 @@ function openStudentProfile(studentId) {
             <div class="list-row"><strong>Телефон</strong><small>${student.phone}</small></div>
             <div class="list-row"><strong>Ментор</strong><small>${student.mentor}</small></div>
             ${isAdmin() ? `<button class="button secondary" data-quick-payment="${student.id}" type="button">Добавить оплату</button>` : ""}
+            ${isParent() ? `<button class="button secondary" data-quick-review="${student.id}" type="button">Оставить отзыв</button>` : ""}
           </div>
         </section>
         <section class="card">
-          <div class="card-header"><h3>Фидбек</h3><button class="button secondary" data-quick-feedback="${student.id}" type="button">Добавить</button></div>
+          <div class="card-header"><h3>Фидбек</h3>${!isParent() ? `<button class="button secondary" data-quick-feedback="${student.id}" type="button">Добавить</button>` : ""}</div>
           <div class="card-body list">
             ${
               feedback
@@ -1461,6 +1653,10 @@ function openStudentProfile(studentId) {
   modalRoot.querySelector("[data-quick-payment]")?.addEventListener("click", () => {
     closeModal();
     openPaymentModal(student.id);
+  });
+  modalRoot.querySelector("[data-quick-review]")?.addEventListener("click", () => {
+    closeModal();
+    openParentReviewModal(student.id);
   });
 }
 
@@ -1493,8 +1689,13 @@ function openUserModal() {
       <label>Имя<input name="name" required placeholder="Имя и фамилия" /></label>
       <label>Email<input name="email" type="email" required placeholder="mentor@s7.kz" /></label>
       <label>Пароль<input name="password" type="password" required minlength="4" placeholder="Временный пароль" /></label>
-      <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="admin">Админ</option></select></label>
+      <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="parent">Родитель</option><option value="admin">Админ</option></select></label>
       <label style="grid-column:1/-1">Группы ментора<input name="groups" placeholder="A1, B2, Senior" /></label>
+      <label style="grid-column:1/-1">Дети родителя
+        <select name="childIds" multiple size="5">
+          ${state.students.map((student) => `<option value="${student.id}">${student.name} · ${student.group}</option>`).join("")}
+        </select>
+      </label>
       <div class="form-actions">
         <button class="button ghost" data-close-modal type="button">Отмена</button>
         <button class="button primary" type="submit">Создать</button>
@@ -1503,7 +1704,9 @@ function openUserModal() {
   );
   modalRoot.querySelector("#userForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const formData = new FormData(event.currentTarget);
+    const form = Object.fromEntries(formData.entries());
+    const childIds = formData.getAll("childIds").map((id) => Number(id));
     const email = form.email.trim().toLowerCase();
     if (state.users.some((user) => user.email.toLowerCase() === email)) {
       modalRoot.querySelector("#userForm").insertAdjacentHTML(
@@ -1518,7 +1721,8 @@ function openUserModal() {
       email,
       password: form.password,
       role: form.role,
-      groups: form.role === "admin" ? [] : form.groups.split(",").map((group) => group.trim()).filter(Boolean),
+      groups: form.role === "mentor" ? form.groups.split(",").map((group) => group.trim()).filter(Boolean) : form.role === "parent" ? childIds : [],
+      childIds,
     };
     if (backendEnabled) {
       await apiRequest("create_user", user);
@@ -1534,7 +1738,7 @@ function openUserModal() {
 }
 
 function openTaskModal() {
-  const users = isAdmin() ? state.users : [currentUser];
+  const users = isAdmin() ? state.users.filter((user) => user.role !== "parent") : [currentUser];
   const assigneeOptions = users.map((user) => `<option>${user.name}</option>`).join("");
   openModal(
     "Новая задача",
@@ -1681,6 +1885,7 @@ async function deleteRecord(type, id) {
     schedule: ["delete_schedule", "schedule"],
     salary: ["delete_salary", "salaries"],
     method: ["delete_method", "methods"],
+    announcement: ["delete_announcement", "announcements"],
   };
   const [action, key] = map[type];
   if (backendEnabled) {
@@ -2022,6 +2227,80 @@ function openFeedbackModal(selectedStudentId = null) {
       return;
     }
     state.feedback.unshift({ ...note, id: Date.now(), studentId: Number(note.studentId) });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openParentReviewModal(selectedStudentId = null) {
+  const students = visibleStudents();
+  if (!students.length) return;
+  openModal(
+    "Отзыв родителя по уроку",
+    `<form class="modal-form" id="parentReviewForm">
+      ${studentSelectField(students, selectedStudentId)}
+      <label>Оценка
+        <select name="rating">
+          <option value="5">5 · отлично</option>
+          <option value="4">4 · хорошо</option>
+          <option value="3">3 · нормально</option>
+          <option value="2">2 · нужно внимание</option>
+          <option value="1">1 · проблема</option>
+        </select>
+      </label>
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label style="grid-column:1/-1">Отзыв<textarea name="text" required placeholder="Что понравилось на уроке, что ребенок рассказал дома, что нужно улучшить"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Отправить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#parentReviewForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const review = Object.fromEntries(new FormData(event.currentTarget).entries());
+    review.studentId = Number(review.studentId);
+    review.rating = Number(review.rating);
+    const student = byId(review.studentId);
+    if (backendEnabled) {
+      await apiRequest("create_parent_review", review);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.parentReviews.unshift({
+      ...review,
+      id: Date.now(),
+      parentId: currentUser.id,
+      mentor: student?.mentor || "",
+      bonusPoints: review.rating * 10,
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openAnnouncementModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Новость или скидка",
+    `<form class="modal-form" id="announcementForm">
+      <label>Заголовок<input name="title" required placeholder="Например, Скидка за активность" /></label>
+      <label>Тип<select name="kind"><option value="news">Новость</option><option value="discount">Скидка</option><option value="bonus">Бонус</option></select></label>
+      <label>До даты<input name="expiresAt" type="date" /></label>
+      <label style="grid-column:1/-1">Текст<textarea name="text" required placeholder="Коротко и понятно для родителей"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Опубликовать</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#announcementForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const item = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("create_announcement", item);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.announcements.unshift({ ...item, id: Date.now() });
     saveState();
     closeModal();
     render();

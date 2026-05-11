@@ -35,6 +35,7 @@ try {
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
+        'create_parent_review' => create_parent_review($pdo, require_user($pdo), $input),
         'create_lesson_check' => create_lesson_check($pdo, require_user($pdo), $input),
         'create_task' => create_task($pdo, require_user($pdo), $input),
         'update_task_status' => update_task_status($pdo, require_user($pdo), $input),
@@ -49,6 +50,8 @@ try {
         'delete_salary' => delete_simple($pdo, require_admin($pdo), $input, 'salaries'),
         'create_method' => create_method($pdo, require_admin($pdo), $input),
         'delete_method' => delete_simple($pdo, require_admin($pdo), $input, 'methods'),
+        'create_announcement' => create_announcement($pdo, require_admin($pdo), $input),
+        'delete_announcement' => delete_simple($pdo, require_admin($pdo), $input, 'announcements'),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -63,7 +66,7 @@ function init_db(PDO $pdo): void
             name text not null,
             email text not null unique,
             password_hash text not null,
-            role text not null check (role in ('admin', 'mentor')),
+            role text not null check (role in ('admin', 'mentor', 'parent')),
             groups_json text not null default '[]',
             created_at text not null default current_timestamp
         );
@@ -174,7 +177,55 @@ function init_db(PDO $pdo): void
             description text,
             created_at text not null default current_timestamp
         );
+        create table if not exists parent_reviews (
+            id integer primary key autoincrement,
+            student_id integer not null references students(id) on delete cascade,
+            parent_id integer not null references users(id) on delete cascade,
+            attendance_id integer references attendance(id) on delete set null,
+            mentor text not null,
+            rating integer not null,
+            text text not null,
+            bonus_points integer not null default 0,
+            date text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists announcements (
+            id integer primary key autoincrement,
+            title text not null,
+            kind text not null default 'news',
+            text text not null,
+            expires_at text,
+            created_at text not null default current_timestamp
+        );
     ");
+    migrate_users_role_check($pdo);
+}
+
+function migrate_users_role_check(PDO $pdo): void
+{
+    $stmt = $pdo->prepare("select sql from sqlite_master where type = 'table' and name = 'users'");
+    $stmt->execute();
+    $sql = (string)$stmt->fetchColumn();
+    if (str_contains($sql, "'parent'")) {
+        return;
+    }
+    $pdo->exec('pragma foreign_keys = off');
+    $pdo->exec("
+        create table users_new (
+            id integer primary key autoincrement,
+            name text not null,
+            email text not null unique,
+            password_hash text not null,
+            role text not null check (role in ('admin', 'mentor', 'parent')),
+            groups_json text not null default '[]',
+            created_at text not null default current_timestamp
+        );
+        insert into users_new (id, name, email, password_hash, role, groups_json, created_at)
+            select id, name, email, password_hash, role, groups_json, created_at from users;
+        drop table users;
+        alter table users_new rename to users;
+    ");
+    $pdo->exec('pragma foreign_keys = on');
 }
 
 function login(PDO $pdo, array $input): void
@@ -210,12 +261,13 @@ function register_first_admin(PDO $pdo, array $input): void
 
 function create_user(PDO $pdo, array $admin, array $input): void
 {
+    $role = in_array(($input['role'] ?? 'mentor'), ['admin', 'mentor', 'parent'], true) ? $input['role'] : 'mentor';
     insert_user($pdo, [
         'name' => required($input, 'name'),
         'email' => required($input, 'email'),
         'password' => required($input, 'password'),
-        'role' => in_array(($input['role'] ?? 'mentor'), ['admin', 'mentor'], true) ? $input['role'] : 'mentor',
-        'groups' => normalize_groups($input['groups'] ?? []),
+        'role' => $role,
+        'groups' => $role === 'admin' ? [] : ($role === 'parent' ? normalize_groups($input['childIds'] ?? $input['groups'] ?? []) : normalize_groups($input['groups'] ?? [])),
     ]);
     data_response($pdo, $admin);
 }
@@ -267,6 +319,9 @@ function create_payment(PDO $pdo, array $admin, array $input): void
 
 function create_attendance(PDO $pdo, array $user, array $input): void
 {
+    if ($user['role'] === 'parent') {
+        fail('Родитель не может менять табель.', 403);
+    }
     $studentId = (int)required($input, 'studentId');
     assert_student_access($pdo, $user, $studentId);
     $stmt = $pdo->prepare('
@@ -287,6 +342,9 @@ function create_attendance(PDO $pdo, array $user, array $input): void
 
 function toggle_attendance(PDO $pdo, array $user, array $input): void
 {
+    if ($user['role'] === 'parent') {
+        fail('Родитель не может менять табель.', 403);
+    }
     $studentId = (int)required($input, 'studentId');
     $date = required($input, 'date');
     assert_student_access($pdo, $user, $studentId);
@@ -333,6 +391,9 @@ function recalc_student_subscription(PDO $pdo, int $studentId): void
 
 function create_feedback(PDO $pdo, array $user, array $input): void
 {
+    if ($user['role'] === 'parent') {
+        fail('Родитель может оставлять отзывы через родительский кабинет.', 403);
+    }
     $studentId = (int)required($input, 'studentId');
     assert_student_access($pdo, $user, $studentId);
     $mentor = $user['role'] === 'admin' ? required($input, 'mentor') : $user['name'];
@@ -344,6 +405,33 @@ function create_feedback(PDO $pdo, array $user, array $input): void
         required($input, 'text'),
         required($input, 'date'),
         (int)$user['id'],
+    ]);
+    data_response($pdo, $user);
+}
+
+function create_parent_review(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] !== 'parent' && $user['role'] !== 'admin') {
+        fail('Отзывы по урокам доступны родителю или администратору.', 403);
+    }
+    $studentId = (int)required($input, 'studentId');
+    assert_student_access($pdo, $user, $studentId);
+    $student = get_student($pdo, $studentId);
+    $rating = max(1, min(5, (int)required($input, 'rating')));
+    $bonus = max(0, $rating * 10);
+    $stmt = $pdo->prepare('
+        insert into parent_reviews (student_id, parent_id, attendance_id, mentor, rating, text, bonus_points, date)
+        values (?, ?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        $studentId,
+        (int)$user['id'],
+        isset($input['attendanceId']) && $input['attendanceId'] !== '' ? (int)$input['attendanceId'] : null,
+        $student['mentor'],
+        $rating,
+        required($input, 'text'),
+        $bonus,
+        $input['date'] ?? date('Y-m-d'),
     ]);
     data_response($pdo, $user);
 }
@@ -503,10 +591,20 @@ function reset_xp(PDO $pdo, array $admin, array $input): void
     }
     $attendanceXp = (int)$stmt->fetchColumn() * 3;
 
+    if ($studentIds) {
+        $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
+        $stmt = $pdo->prepare("select coalesce(sum(bonus_points), 0) from parent_reviews where mentor = ? or student_id in ($placeholders)");
+        $stmt->execute([$mentor, ...$studentIds]);
+    } else {
+        $stmt = $pdo->prepare('select coalesce(sum(bonus_points), 0) from parent_reviews where mentor = ?');
+        $stmt->execute([$mentor]);
+    }
+    $parentReviewXp = (int)$stmt->fetchColumn();
+
     $stmt = $pdo->prepare('select coalesce(sum(amount), 0) from xp_adjustments where mentor = ?');
     $stmt->execute([$mentor]);
     $manualXp = (int)$stmt->fetchColumn();
-    $amount = -($checksXp + $feedbackXp + $attendanceXp + $manualXp);
+    $amount = -($checksXp + $feedbackXp + $attendanceXp + $parentReviewXp + $manualXp);
     $stmt = $pdo->prepare('insert into xp_adjustments (mentor, amount, reason, date, created_by) values (?, ?, ?, ?, ?)');
     $stmt->execute([$mentor, $amount, 'Сброс XP администратором', date('Y-m-d'), $admin['name']]);
     data_response($pdo, $admin);
@@ -553,9 +651,21 @@ function create_method(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function create_announcement(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into announcements (title, kind, text, expires_at) values (?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'title'),
+        $input['kind'] ?? 'news',
+        required($input, 'text'),
+        $input['expiresAt'] ?? null,
+    ]);
+    data_response($pdo, $admin);
+}
+
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -570,20 +680,23 @@ function data_response(PDO $pdo, array $user): void
 function state_for_user(PDO $pdo, array $user): array
 {
     $isAdmin = $user['role'] === 'admin';
-    $students = $isAdmin ? all_students($pdo) : mentor_students($pdo, $user);
+    $isParent = $user['role'] === 'parent';
+    $students = $isAdmin ? all_students($pdo) : ($isParent ? parent_students($pdo, $user) : mentor_students($pdo, $user));
     $ids = array_map(fn($student) => (int)$student['id'], $students);
     return [
         'users' => $isAdmin ? all_users($pdo) : [public_user($user)],
         'students' => $students,
-        'payments' => $isAdmin ? all_payments($pdo) : [],
+        'payments' => $isAdmin ? all_payments($pdo) : ($isParent ? rows_for_ids($pdo, 'payments', $ids) : []),
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
-        'schedule' => $isAdmin ? all_schedule($pdo) : mentor_schedule($pdo, $user),
-        'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : mentor_lesson_checks($pdo, $user),
-        'tasks' => $isAdmin ? all_tasks($pdo) : user_tasks($pdo, $user),
-        'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : mentor_xp_adjustments($pdo, $user),
-        'salaries' => $isAdmin ? all_salaries($pdo) : mentor_salaries($pdo, $user),
-        'methods' => $isAdmin ? all_methods($pdo) : mentor_methods($pdo, $user),
+        'schedule' => $isAdmin ? all_schedule($pdo) : ($isParent ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
+        'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : ($isParent ? [] : mentor_lesson_checks($pdo, $user)),
+        'tasks' => $isAdmin ? all_tasks($pdo) : ($isParent ? [] : user_tasks($pdo, $user)),
+        'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : ($isParent ? [] : mentor_xp_adjustments($pdo, $user)),
+        'salaries' => $isAdmin ? all_salaries($pdo) : ($isParent ? [] : mentor_salaries($pdo, $user)),
+        'methods' => $isAdmin ? all_methods($pdo) : ($isParent ? [] : mentor_methods($pdo, $user)),
+        'parentReviews' => $isAdmin ? all_parent_reviews($pdo) : parent_reviews_for_ids($pdo, $ids),
+        'announcements' => all_announcements($pdo),
     ];
 }
 
@@ -607,6 +720,16 @@ function mentor_students(PDO $pdo, array $user): array
     return array_map('student_row', $stmt->fetchAll());
 }
 
+function parent_students(PDO $pdo, array $user): array
+{
+    $ids = array_values(array_filter(array_map('intval', user_groups($user))));
+    if (!$ids) return [];
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare("select * from students where id in ($placeholders) order by created_at desc");
+    $stmt->execute($ids);
+    return array_map('student_row', $stmt->fetchAll());
+}
+
 function all_payments(PDO $pdo): array
 {
     return array_map('payment_row', $pdo->query('select * from payments order by date desc, id desc')->fetchAll());
@@ -624,6 +747,16 @@ function mentor_schedule(PDO $pdo, array $user): array
     $placeholders = implode(',', array_fill(0, count($groups), '?'));
     $stmt = $pdo->prepare("select * from schedule where group_name in ($placeholders) or mentor = ? order by id asc");
     $stmt->execute([...$groups, $user['name']]);
+    return array_map('schedule_row', $stmt->fetchAll());
+}
+
+function schedule_for_students(PDO $pdo, array $students): array
+{
+    $groups = array_values(array_unique(array_map(fn($student) => $student['group'], $students)));
+    if (!$groups) return [];
+    $placeholders = implode(',', array_fill(0, count($groups), '?'));
+    $stmt = $pdo->prepare("select * from schedule where group_name in ($placeholders) order by id desc");
+    $stmt->execute($groups);
     return array_map('schedule_row', $stmt->fetchAll());
 }
 
@@ -700,10 +833,30 @@ function rows_for_ids(PDO $pdo, string $table, array $ids): array
 {
     if (!$ids) return [];
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $pdo->prepare("select * from $table where student_id in ($placeholders) order by date desc, id desc");
+    $order = $table === 'payments' ? 'date desc, id desc' : 'date desc, id desc';
+    $stmt = $pdo->prepare("select * from $table where student_id in ($placeholders) order by $order");
     $stmt->execute($ids);
-    $mapper = $table === 'attendance' ? 'attendance_row' : 'feedback_row';
+    $mapper = $table === 'attendance' ? 'attendance_row' : ($table === 'payments' ? 'payment_row' : 'feedback_row');
     return array_map($mapper, $stmt->fetchAll());
+}
+
+function all_parent_reviews(PDO $pdo): array
+{
+    return array_map('parent_review_row', $pdo->query('select * from parent_reviews order by date desc, id desc')->fetchAll());
+}
+
+function parent_reviews_for_ids(PDO $pdo, array $ids): array
+{
+    if (!$ids) return [];
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare("select * from parent_reviews where student_id in ($placeholders) order by date desc, id desc");
+    $stmt->execute($ids);
+    return array_map('parent_review_row', $stmt->fetchAll());
+}
+
+function all_announcements(PDO $pdo): array
+{
+    return array_map('announcement_row', $pdo->query('select * from announcements order by created_at desc, id desc')->fetchAll());
 }
 
 function insert_user(PDO $pdo, array $user): int
@@ -750,6 +903,12 @@ function require_admin(PDO $pdo): array
 function assert_student_access(PDO $pdo, array $user, int $studentId): void
 {
     if ($user['role'] === 'admin') return;
+    if ($user['role'] === 'parent') {
+        if (in_array((string)$studentId, user_groups($user), true) || in_array($studentId, array_map('intval', user_groups($user)), true)) {
+            return;
+        }
+        fail('Родитель видит только привязанных детей.', 403);
+    }
     $stmt = $pdo->prepare('select * from students where id = ?');
     $stmt->execute([$studentId]);
     $student = $stmt->fetch();
@@ -757,6 +916,13 @@ function assert_student_access(PDO $pdo, array $user, int $studentId): void
     if (!in_array($student['group_name'], user_groups($user), true) && $student['mentor'] !== $user['name']) {
         fail('Нет доступа к этому ученику.', 403);
     }
+}
+
+function get_student(PDO $pdo, int $studentId): array
+{
+    $stmt = $pdo->prepare('select * from students where id = ?');
+    $stmt->execute([$studentId]);
+    return $stmt->fetch() ?: fail('Ученик не найден.', 404);
 }
 
 function create_session(PDO $pdo, int $userId): string
@@ -863,6 +1029,32 @@ function feedback_row(array $row): array
         'skill' => $row['skill'],
         'text' => $row['text'],
         'date' => $row['date'],
+    ];
+}
+
+function parent_review_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'studentId' => (int)$row['student_id'],
+        'parentId' => (int)$row['parent_id'],
+        'attendanceId' => isset($row['attendance_id']) ? (int)$row['attendance_id'] : null,
+        'mentor' => $row['mentor'],
+        'rating' => (int)$row['rating'],
+        'text' => $row['text'],
+        'bonusPoints' => (int)$row['bonus_points'],
+        'date' => $row['date'],
+    ];
+}
+
+function announcement_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'title' => $row['title'],
+        'kind' => $row['kind'],
+        'text' => $row['text'],
+        'expiresAt' => $row['expires_at'],
     ];
 }
 
