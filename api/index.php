@@ -42,6 +42,7 @@ try {
         'delete_student' => delete_student($pdo, require_admin($pdo), $input),
         'delete_user' => delete_user($pdo, require_admin($pdo), $input),
         'adjust_xp' => adjust_xp($pdo, require_admin($pdo), $input),
+        'reset_xp' => reset_xp($pdo, require_admin($pdo), $input),
         'create_schedule' => create_schedule($pdo, require_admin($pdo), $input),
         'delete_schedule' => delete_simple($pdo, require_admin($pdo), $input, 'schedule'),
         'create_salary' => create_salary($pdo, require_admin($pdo), $input),
@@ -221,6 +222,7 @@ function create_user(PDO $pdo, array $admin, array $input): void
 
 function create_student(PDO $pdo, array $admin, array $input): void
 {
+    $paymentDate = $input['paymentDate'] ?? $input['nextPayment'] ?? date('Y-m-d');
     $stmt = $pdo->prepare('
         insert into students (name, course, group_name, parent, phone, mentor, status, lessons_left, progress, next_payment)
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -233,10 +235,13 @@ function create_student(PDO $pdo, array $admin, array $input): void
         required($input, 'phone'),
         required($input, 'mentor'),
         $input['status'] ?? 'active',
-        (int)($input['lessonsLeft'] ?? 0),
+        8,
         (int)($input['progress'] ?? 10),
-        $input['nextPayment'] ?? date('Y-m-d', strtotime('+30 days')),
+        $paymentDate,
     ]);
+    $studentId = (int)$pdo->lastInsertId();
+    $stmt = $pdo->prepare('insert into payments (student_id, plan, amount, status, date) values (?, ?, ?, ?, ?)');
+    $stmt->execute([$studentId, '8 занятий', (int)($input['amount'] ?? 0), 'paid', $paymentDate]);
     data_response($pdo, $admin);
 }
 
@@ -255,6 +260,7 @@ function create_payment(PDO $pdo, array $admin, array $input): void
     if (($input['status'] ?? 'paid') === 'paid') {
         $stmt = $pdo->prepare('update students set lessons_left = 8, next_payment = ? where id = ?');
         $stmt->execute([$date, $studentId]);
+        recalc_student_subscription($pdo, $studentId);
     }
     data_response($pdo, $admin);
 }
@@ -275,6 +281,7 @@ function create_attendance(PDO $pdo, array $user, array $input): void
         required($input, 'topic'),
         (int)$user['id'],
     ]);
+    recalc_student_subscription($pdo, $studentId);
     data_response($pdo, $user);
 }
 
@@ -296,7 +303,32 @@ function toggle_attendance(PDO $pdo, array $user, array $input): void
         $stmt = $pdo->prepare('delete from attendance where id = ?');
         $stmt->execute([(int)$record['id']]);
     }
+    recalc_student_subscription($pdo, $studentId);
     data_response($pdo, $user);
+}
+
+function recalc_student_subscription(PDO $pdo, int $studentId): void
+{
+    $stmt = $pdo->prepare('select date from payments where student_id = ? and status = ? order by date desc, id desc limit 1');
+    $stmt->execute([$studentId, 'paid']);
+    $startDate = $stmt->fetchColumn();
+    if (!$startDate) {
+        $stmt = $pdo->prepare('select next_payment from students where id = ?');
+        $stmt->execute([$studentId]);
+        $startDate = $stmt->fetchColumn();
+    }
+
+    if (!$startDate) {
+        return;
+    }
+
+    $stmt = $pdo->prepare('select count(*) from attendance where student_id = ? and status = ? and date >= ?');
+    $stmt->execute([$studentId, 'present', $startDate]);
+    $used = min(8, (int)$stmt->fetchColumn());
+    $lessonsLeft = max(0, 8 - $used);
+
+    $stmt = $pdo->prepare('update students set lessons_left = ? where id = ?');
+    $stmt->execute([$lessonsLeft, $studentId]);
 }
 
 function create_feedback(PDO $pdo, array $user, array $input): void
@@ -427,6 +459,56 @@ function adjust_xp(PDO $pdo, array $admin, array $input): void
         $input['date'] ?? date('Y-m-d'),
         $admin['name'],
     ]);
+    data_response($pdo, $admin);
+}
+
+function reset_xp(PDO $pdo, array $admin, array $input): void
+{
+    $mentor = required($input, 'mentor');
+    $stmt = $pdo->prepare('select * from users where name = ? limit 1');
+    $stmt->execute([$mentor]);
+    $mentorUser = $stmt->fetch();
+    $groups = $mentorUser ? user_groups($mentorUser) : [];
+    if ($groups) {
+        $placeholders = implode(',', array_fill(0, count($groups), '?'));
+        $stmt = $pdo->prepare("select id from students where group_name in ($placeholders) or mentor = ?");
+        $stmt->execute([...$groups, $mentor]);
+    } else {
+        $stmt = $pdo->prepare('select id from students where mentor = ?');
+        $stmt->execute([$mentor]);
+    }
+    $studentIds = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+
+    $stmt = $pdo->prepare('select coalesce(sum(score), 0) from lesson_checks where mentor = ?');
+    $stmt->execute([$mentor]);
+    $checksXp = (int)$stmt->fetchColumn();
+
+    if ($studentIds) {
+        $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
+        $stmt = $pdo->prepare("select count(*) from feedback where mentor = ? or student_id in ($placeholders)");
+        $stmt->execute([$mentor, ...$studentIds]);
+    } else {
+        $stmt = $pdo->prepare('select count(*) from feedback where mentor = ?');
+        $stmt->execute([$mentor]);
+    }
+    $feedbackXp = (int)$stmt->fetchColumn() * 15;
+
+    if ($studentIds) {
+        $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
+        $stmt = $pdo->prepare("select count(*) from attendance where student_id in ($placeholders) and status = ?");
+        $stmt->execute([...$studentIds, 'present']);
+    } else {
+        $stmt = $pdo->prepare('select count(attendance.id) from attendance join students on students.id = attendance.student_id where students.mentor = ? and attendance.status = ?');
+        $stmt->execute([$mentor, 'present']);
+    }
+    $attendanceXp = (int)$stmt->fetchColumn() * 3;
+
+    $stmt = $pdo->prepare('select coalesce(sum(amount), 0) from xp_adjustments where mentor = ?');
+    $stmt->execute([$mentor]);
+    $manualXp = (int)$stmt->fetchColumn();
+    $amount = -($checksXp + $feedbackXp + $attendanceXp + $manualXp);
+    $stmt = $pdo->prepare('insert into xp_adjustments (mentor, amount, reason, date, created_by) values (?, ?, ?, ?, ?)');
+    $stmt->execute([$mentor, $amount, 'Сброс XP администратором', date('Y-m-d'), $admin['name']]);
     data_response($pdo, $admin);
 }
 

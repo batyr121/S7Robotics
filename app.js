@@ -242,6 +242,10 @@ function subscriptionStatus(student) {
   };
 }
 
+function adminSubscriptionAlerts() {
+  return visibleStudents().filter((student) => subscriptionStatus(student).needsPayment);
+}
+
 function estimateNextPaymentDate(student, startDate, used) {
   if (!startDate) return student.nextPayment || "";
   if (used >= 7) {
@@ -546,6 +550,7 @@ function renderDashboard() {
     ? Math.round(students.reduce((sum, student) => sum + student.progress, 0) / students.length)
     : 0;
   const present = attendance.filter((item) => item.status === "present").length;
+  const subAlerts = isAdmin() ? adminSubscriptionAlerts().length : 0;
 
   return `
     ${dashboardLanding(students.length, active, present)}
@@ -554,6 +559,7 @@ function renderDashboard() {
       ${stat("Активные", active, "учатся сейчас")}
       ${stat("Посещений", present, "отмечено")}
       ${stat(isAdmin() ? "Выручка" : "Прогресс", isAdmin() ? formatMoney(revenue) : `${avgProgress}%`, isAdmin() ? `${due} оплат к контролю` : "средний по группам")}
+      ${isAdmin() ? stat("Абонементы", subAlerts, "учеников на оплату") : ""}
     </div>
     <div class="module-grid">
       <article class="card">
@@ -772,7 +778,8 @@ function renderStudents() {
                     <td>${student.mentor}</td>
                     <td>
                       <strong>${sub.visitLabel}</strong>
-                      <small>${sub.startDate ? `с ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
+                      <small>${sub.remaining} занятий осталось</small>
+                      <small>${sub.startDate ? `оплата ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
                       <small>${isAdmin() ? `оплата ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана"}` : "детали у админа"}</small>
                     </td>
                     <td><span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : student.status}">${sub.expired ? "Нужна оплата" : sub.needsPayment ? "7-е посещение" : statusText[student.status]}</span></td>
@@ -1193,6 +1200,7 @@ function mentorGamificationCard(mentor) {
         <div class="filters">
           <button class="button primary" data-add-lesson-check="${mentor.name}" type="button">+ Проверить урок</button>
           ${isAdmin() ? `<button class="button secondary" data-adjust-xp="${mentor.name}" type="button">XP + / -</button>` : ""}
+          ${isAdmin() ? `<button class="button danger compact" data-reset-xp="${mentor.name}" type="button">Сброс XP</button>` : ""}
         </div>
       </div>
       <div class="quality-layout">
@@ -1350,6 +1358,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-adjust-xp]").forEach((button) => {
     button.addEventListener("click", () => openXpModal(button.dataset.adjustXp));
   });
+  document.querySelectorAll("[data-reset-xp]").forEach((button) => {
+    button.addEventListener("click", () => resetMentorXp(button.dataset.resetXp));
+  });
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
@@ -1408,7 +1419,7 @@ function openStudentProfile(studentId) {
     `<div class="profile-modal">
       <div class="profile-summary">
         ${stat("Группа", student.group, student.course)}
-        ${stat("Абонемент", sub.visitLabel, sub.startDate ? `с ${formatDate(sub.startDate)}` : "нет оплаты")}
+        ${stat("Абонемент", sub.visitLabel, `${sub.remaining} занятий осталось`)}
         ${stat("Прогресс", `${student.progress}%`, "текущий уровень")}
         ${stat("Оплата", sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана", sub.needsPayment ? "пора напомнить" : "по графику")}
       </div>
@@ -1836,6 +1847,27 @@ function openXpModal(selectedMentor) {
   });
 }
 
+async function resetMentorXp(mentor) {
+  if (!isAdmin() || !confirm(`Сбросить XP ментора ${mentor}?`)) return;
+  if (backendEnabled) {
+    await apiRequest("reset_xp", { mentor });
+    await refreshData();
+    return;
+  }
+  const mentorUser = state.users.find((user) => user.name === mentor) || { name: mentor, role: "mentor", groups: [] };
+  const quality = mentorQualityStats(mentorUser);
+  state.xpAdjustments.unshift({
+    id: Date.now(),
+    mentor,
+    amount: -quality.xp,
+    reason: "Сброс XP администратором",
+    date: new Date().toISOString().slice(0, 10),
+    createdBy: currentUser.name,
+  });
+  saveState();
+  render();
+}
+
 function lessonQualityCriteria() {
   return ["goal", "demo", "practice", "individual", "questions", "debug", "discipline", "safety", "feedback", "crm"];
 }
@@ -1858,6 +1890,8 @@ function openStudentModal() {
   const wrapper = document.createElement("div");
   wrapper.append(template);
   openModal("Новый ученик", wrapper.innerHTML);
+  const paymentDateInput = modalRoot.querySelector("[name='paymentDate']");
+  if (paymentDateInput) paymentDateInput.value = new Date().toISOString().slice(0, 10);
   const mentorSelect = modalRoot.querySelector("#mentorSelect");
   mentorSelect.innerHTML = state.users
     .filter((user) => user.role === "mentor")
@@ -1869,9 +1903,9 @@ function openStudentModal() {
     const student = Object.fromEntries(form.entries());
     const payload = {
       ...student,
-      lessonsLeft: Number(student.lessonsLeft),
+      lessonsLeft: 8,
       progress: 10,
-      nextPayment: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10),
+      nextPayment: student.paymentDate,
     };
     if (backendEnabled) {
       await apiRequest("create_student", payload);
@@ -1882,6 +1916,14 @@ function openStudentModal() {
     state.students.unshift({
       ...payload,
       id: Date.now(),
+    });
+    state.payments.unshift({
+      id: Date.now() + 1,
+      studentId: state.students[0].id,
+      plan: "8 занятий",
+      amount: 0,
+      status: "paid",
+      date: student.paymentDate,
     });
     saveState();
     closeModal();
