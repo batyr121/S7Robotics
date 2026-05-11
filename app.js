@@ -1103,6 +1103,7 @@ function renderFeedback() {
 function renderParentPortal() {
   const students = visibleStudents();
   const reviews = visibleParentReviews();
+  const weekly = weeklyPassProgress();
   return `
     <div class="toolbar">
       <button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>
@@ -1127,13 +1128,26 @@ function renderParentPortal() {
       ${students.map((student) => parentStudentCard(student)).join("") || `<div class="empty">Админ еще не привязал детей к аккаунту родителя.</div>`}
     </div>
     <article class="card">
-      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">Season Pass</span></div>
+      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">обновляется еженедельно</span></div>
+      <div class="weekly-pass">
+        <div>
+          <span>Неделя ${weekly.week}</span>
+          <strong>${weekly.done}/${weekly.total} миссий закрыто</strong>
+          <small>${weekly.xp} XP недели · награды открываются по заполнению шкалы</small>
+        </div>
+        <div class="weekly-meter" aria-label="Заполнение сезонного пропуска">
+          <span style="width:${weekly.percent}%"></span>
+        </div>
+      </div>
+      <div class="weekly-missions">
+        ${weekly.missions.map((mission) => missionRow(mission)).join("")}
+      </div>
       <div class="season-pass">
-        ${seasonReward(1, "5% скидка", "на следующий абонемент")}
-        ${seasonReward(2, "3D принтер", "30 минут печати бесплатно")}
-        ${seasonReward(3, "Мастер-класс", "закрытый воркшоп по роботам")}
-        ${seasonReward(4, "Консультация", "разбор проекта с мастером")}
-        ${seasonReward(5, "10% скидка", "на абонемент или лагерь")}
+        ${seasonReward(20, "5% скидка", "на следующий абонемент")}
+        ${seasonReward(40, "3D принтер", "30 минут печати бесплатно")}
+        ${seasonReward(60, "Мастер-класс", "закрытый воркшоп по роботам")}
+        ${seasonReward(80, "Консультация", "разбор проекта с мастером")}
+        ${seasonReward(100, "10% скидка", "на абонемент или лагерь")}
       </div>
     </article>
   `;
@@ -1236,11 +1250,35 @@ function defaultAnnouncements() {
   `;
 }
 
-function seasonReward(level, title, text) {
-  const bestLevel = Math.max(0, ...visibleStudents().map((student) => childGamification(student).level));
+function weeklyPassProgress() {
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const week = Math.max(1, Math.ceil(((now - yearStart) / 86400000 + yearStart.getDay() + 1) / 7));
+  const students = visibleStudents();
+  const reviews = visibleParentReviews();
+  const attendance = visibleAttendance().filter((item) => item.status === "present");
+  const feedback = visibleFeedback();
+  const avgProgram = students.length
+    ? Math.round(students.reduce((sum, student) => sum + programProgress(student).percent, 0) / students.length)
+    : 0;
+  const missions = [
+    dailyTask("Посетить 2 урока", attendance.length >= 2, `${Math.min(attendance.length, 2)}/2 посещений`),
+    dailyTask("Оставить отзыв", reviews.length >= 1, `${reviews.length} отзывов`),
+    dailyTask("Получить фидбек", feedback.length >= 1, `${feedback.length} заметок ментора`),
+    dailyTask("Продвинуть программу", avgProgram >= 25, `${avgProgram}% среднего прогресса`),
+  ];
+  const done = missions.filter((mission) => mission.done).length;
+  const total = missions.length;
+  const percent = Math.round((done / total) * 100);
+  const xp = students.reduce((sum, student) => sum + childGamification(student).xp, 0) + reviews.length * 20;
+  return { week, missions, done, total, percent, xp };
+}
+
+function seasonReward(percent, title, text) {
+  const weekly = weeklyPassProgress();
   return `
-    <div class="season-reward ${bestLevel >= level * 2 ? "unlocked" : ""}">
-      <span>${level}</span>
+    <div class="season-reward ${weekly.percent >= percent ? "unlocked" : ""}">
+      <span>${percent}%</span>
       <strong>${title}</strong>
       <small>${text}</small>
     </div>`;
