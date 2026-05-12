@@ -47,6 +47,8 @@ try {
         'reset_xp' => reset_xp($pdo, require_admin($pdo), $input),
         'create_schedule' => create_schedule($pdo, require_admin($pdo), $input),
         'delete_schedule' => delete_simple($pdo, require_admin($pdo), $input, 'schedule'),
+        'create_trial' => create_trial($pdo, require_admin($pdo), $input),
+        'update_trial_status' => update_trial_status($pdo, require_user($pdo), $input),
         'create_salary' => create_salary($pdo, require_admin($pdo), $input),
         'delete_salary' => delete_simple($pdo, require_admin($pdo), $input, 'salaries'),
         'create_method' => create_method($pdo, require_admin($pdo), $input),
@@ -125,6 +127,22 @@ function init_db(PDO $pdo): void
             group_name text not null,
             time text not null,
             mentor text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists trial_lessons (
+            id integer primary key autoincrement,
+            child_name text not null,
+            parent_name text not null,
+            phone text not null,
+            program text not null check (program in ('A', 'B')),
+            group_name text not null,
+            day text not null,
+            time text not null,
+            date text not null,
+            mentor text not null,
+            status text not null default 'scheduled',
+            note text,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
         create table if not exists lesson_checks (
@@ -625,6 +643,100 @@ function create_schedule(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function create_trial(PDO $pdo, array $admin, array $input): void
+{
+    $program = strtoupper((string)($input['program'] ?? 'A')) === 'B' ? 'B' : 'A';
+    $slot = find_trial_slot($pdo, $program, $input['preferredDate'] ?? date('Y-m-d'));
+    if (!$slot) {
+        fail("Нет свободного времени для программы $program. Добавьте расписание или освободите группу.", 422);
+    }
+    $stmt = $pdo->prepare('
+        insert into trial_lessons (child_name, parent_name, phone, program, group_name, day, time, date, mentor, status, note, created_by)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        required($input, 'childName'),
+        required($input, 'parentName'),
+        required($input, 'phone'),
+        $program,
+        $slot['group_name'],
+        $slot['day'],
+        $slot['time'],
+        $slot['date'],
+        $slot['mentor'],
+        'scheduled',
+        $input['note'] ?? '',
+        $admin['name'],
+    ]);
+    data_response($pdo, $admin);
+}
+
+function update_trial_status(PDO $pdo, array $user, array $input): void
+{
+    $status = $input['status'] ?? 'scheduled';
+    if (!in_array($status, ['scheduled', 'confirmed', 'visited', 'missed', 'converted', 'cancelled'], true)) {
+        fail('Некорректный статус пробного урока.', 422);
+    }
+    $stmt = $pdo->prepare('select * from trial_lessons where id = ?');
+    $stmt->execute([(int)required($input, 'id')]);
+    $trial = $stmt->fetch();
+    if (!$trial) fail('Пробный урок не найден.', 404);
+    if ($user['role'] !== 'admin' && ($trial['mentor'] !== $user['name'] && !in_array($trial['group_name'], user_groups($user), true))) {
+        fail('Нет доступа к этому пробному уроку.', 403);
+    }
+    $stmt = $pdo->prepare('update trial_lessons set status = ? where id = ?');
+    $stmt->execute([$status, (int)$trial['id']]);
+    data_response($pdo, $user);
+}
+
+function find_trial_slot(PDO $pdo, string $program, string $preferredDate): ?array
+{
+    $stmt = $pdo->prepare('select * from schedule order by id asc');
+    $stmt->execute();
+    $slots = [];
+    foreach ($stmt->fetchAll() as $lesson) {
+        if (group_program($lesson['group_name']) !== $program) continue;
+        $occupied = group_occupancy($pdo, $lesson['group_name']);
+        $capacity = group_capacity($lesson['group_name']);
+        if ($occupied >= $capacity) continue;
+        $lesson['date'] = next_date_for_day($lesson['day'], $preferredDate);
+        $lesson['free'] = $capacity - $occupied;
+        $slots[] = $lesson;
+    }
+    usort($slots, fn($a, $b) => strcmp($a['date'], $b['date']) ?: ($b['free'] <=> $a['free']) ?: strcmp($a['time'], $b['time']));
+    return $slots[0] ?? null;
+}
+
+function group_program(string $group): string
+{
+    return preg_match('/(^|\s|-)b(\s|$|-)|программа\s*b|program\s*b|senior|advanced/ui', $group) ? 'B' : 'A';
+}
+
+function group_capacity(string $group): int
+{
+    return group_program($group) === 'B' ? 9 : 7;
+}
+
+function group_occupancy(PDO $pdo, string $group): int
+{
+    $stmt = $pdo->prepare('select count(*) from students where group_name = ? and status != ?');
+    $stmt->execute([$group, 'pause']);
+    $students = (int)$stmt->fetchColumn();
+    $stmt = $pdo->prepare("select count(*) from trial_lessons where group_name = ? and status in ('scheduled', 'confirmed')");
+    $stmt->execute([$group]);
+    return $students + (int)$stmt->fetchColumn();
+}
+
+function next_date_for_day(string $day, string $fromDate): string
+{
+    $map = ['Вс' => 0, 'Пн' => 1, 'Вт' => 2, 'Ср' => 3, 'Чт' => 4, 'Пт' => 5, 'Сб' => 6];
+    $target = $map[$day] ?? (int)date('w', strtotime($fromDate));
+    $timestamp = strtotime($fromDate) ?: time();
+    $current = (int)date('w', $timestamp);
+    $diff = ($target - $current + 7) % 7;
+    return date('Y-m-d', strtotime("+$diff days", $timestamp));
+}
+
 function create_salary(PDO $pdo, array $admin, array $input): void
 {
     $stmt = $pdo->prepare('insert into salaries (mentor, period, amount, pay_date, status, note) values (?, ?, ?, ?, ?, ?)');
@@ -693,6 +805,7 @@ function state_for_user(PDO $pdo, array $user): array
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
         'schedule' => $isAdmin ? all_schedule($pdo) : ($isParent ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
+        'trialLessons' => $isAdmin ? all_trial_lessons($pdo) : ($isParent ? [] : mentor_trial_lessons($pdo, $user)),
         'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : ($isParent ? [] : mentor_lesson_checks($pdo, $user)),
         'tasks' => $isAdmin ? all_tasks($pdo) : ($isParent ? [] : user_tasks($pdo, $user)),
         'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : ($isParent ? [] : mentor_xp_adjustments($pdo, $user)),
@@ -761,6 +874,27 @@ function schedule_for_students(PDO $pdo, array $students): array
     $stmt = $pdo->prepare("select * from schedule where group_name in ($placeholders) order by id desc");
     $stmt->execute($groups);
     return array_map('schedule_row', $stmt->fetchAll());
+}
+
+function all_trial_lessons(PDO $pdo): array
+{
+    return array_map('trial_lesson_row', $pdo->query('select * from trial_lessons order by date desc, time asc, id desc')->fetchAll());
+}
+
+function mentor_trial_lessons(PDO $pdo, array $user): array
+{
+    $groups = user_groups($user);
+    $params = [$user['name']];
+    $sql = 'select * from trial_lessons where mentor = ?';
+    if ($groups) {
+        $placeholders = implode(',', array_fill(0, count($groups), '?'));
+        $sql .= " or group_name in ($placeholders)";
+        $params = [...$params, ...$groups];
+    }
+    $sql .= ' order by date desc, time asc, id desc';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return array_map('trial_lesson_row', $stmt->fetchAll());
 }
 
 function all_salaries(PDO $pdo): array
@@ -1069,6 +1203,25 @@ function schedule_row(array $row): array
         'group' => $row['group_name'],
         'time' => $row['time'],
         'mentor' => $row['mentor'],
+    ];
+}
+
+function trial_lesson_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'childName' => $row['child_name'],
+        'parentName' => $row['parent_name'],
+        'phone' => $row['phone'],
+        'program' => $row['program'],
+        'group' => $row['group_name'],
+        'day' => $row['day'],
+        'time' => $row['time'],
+        'date' => $row['date'],
+        'mentor' => $row['mentor'],
+        'status' => $row['status'],
+        'note' => $row['note'] ?? '',
+        'createdBy' => $row['created_by'],
     ];
 }
 

@@ -10,6 +10,7 @@ const seed = {
   attendance: [],
   feedback: [],
   schedule: [],
+  trialLessons: [],
   lessonChecks: [],
   tasks: [],
   xpAdjustments: [],
@@ -67,6 +68,7 @@ function normalizeState(nextState) {
   nextState.payments = nextState.payments || [];
   nextState.feedback = nextState.feedback || [];
   nextState.schedule = nextState.schedule || [];
+  nextState.trialLessons = nextState.trialLessons || [];
   nextState.lessonChecks = nextState.lessonChecks || [];
   nextState.tasks = nextState.tasks || [];
   nextState.xpAdjustments = nextState.xpAdjustments || [];
@@ -158,7 +160,7 @@ function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   if (isParent()) return ["dashboard", "students", "attendance", "schedule", "feedback", "parent"].includes(view);
-  return ["dashboard", "students", "attendance", "schedule", "feedback", "tasks", "methods", "salary", "team"].includes(view);
+  return ["dashboard", "students", "attendance", "schedule", "trials", "feedback", "tasks", "methods", "salary", "team"].includes(view);
 }
 
 function visibleStudents() {
@@ -199,6 +201,13 @@ function visibleSchedule() {
   }
   const groups = new Set(currentUser?.groups || []);
   return state.schedule.filter((lesson) => groups.has(lesson.group) || lesson.mentor === currentUser?.name);
+}
+
+function visibleTrialLessons() {
+  if (isAdmin()) return state.trialLessons || [];
+  if (isParent()) return [];
+  const groups = new Set(currentUser?.groups || []);
+  return (state.trialLessons || []).filter((lesson) => groups.has(lesson.group) || lesson.mentor === currentUser?.name);
 }
 
 function visibleParentReviews() {
@@ -324,6 +333,50 @@ function groupAnalytics() {
 
 function uniqueGroups() {
   return [...new Set(visibleStudents().map((student) => student.group))].sort();
+}
+
+function groupProgram(group) {
+  return /(^|\s|-)b(\s|$|-)|программа\s*b|program\s*b|senior|advanced/i.test(group || "") ? "B" : "A";
+}
+
+function groupCapacity(group) {
+  return groupProgram(group) === "B" ? 9 : 7;
+}
+
+function groupOccupancy(group) {
+  const students = state.students.filter((student) => student.group === group && student.status !== "pause").length;
+  const trials = (state.trialLessons || []).filter((lesson) => lesson.group === group && ["scheduled", "confirmed"].includes(lesson.status)).length;
+  return students + trials;
+}
+
+function nextDateForDay(day, from = new Date()) {
+  const map = { Вс: 0, Пн: 1, Вт: 2, Ср: 3, Чт: 4, Пт: 5, Сб: 6 };
+  const target = map[day] ?? from.getDay();
+  const date = new Date(from);
+  date.setHours(12, 0, 0, 0);
+  const diff = (target - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function findTrialSlot(program = "A", fromDate = "") {
+  const start = fromDate ? new Date(fromDate) : new Date();
+  const options = (state.schedule || [])
+    .filter((lesson) => groupProgram(lesson.group) === program)
+    .map((lesson) => {
+      const occupied = groupOccupancy(lesson.group);
+      const capacity = groupCapacity(lesson.group);
+      return {
+        ...lesson,
+        date: nextDateForDay(lesson.day, start),
+        occupied,
+        capacity,
+        free: capacity - occupied,
+      };
+    })
+    .filter((lesson) => lesson.free > 0)
+    .sort((a, b) => new Date(a.date) - new Date(b.date) || b.free - a.free || a.time.localeCompare(b.time));
+  return options[0] || null;
 }
 
 function latestFeedbackDate(studentId) {
@@ -532,6 +585,7 @@ function updatePageTitle() {
     students: "Ученики",
     attendance: "Табель посещаемости",
     schedule: "Расписание",
+    trials: "Пробные уроки",
     payments: "Абонементы",
     feedback: "Фидбек",
     parent: "Семья",
@@ -548,6 +602,7 @@ function render() {
     students: renderStudents,
     attendance: renderAttendance,
     schedule: renderSchedule,
+    trials: renderTrials,
     payments: renderPayments,
     feedback: renderFeedback,
     parent: renderParentPortal,
@@ -990,6 +1045,73 @@ function renderSchedule() {
       </div>
     </article>
   `;
+}
+
+function renderTrials() {
+  const trials = visibleTrialLessons();
+  const scheduled = trials.filter((lesson) => lesson.status === "scheduled" || lesson.status === "confirmed").length;
+  const openA = trialOpenSlots("A");
+  const openB = trialOpenSlots("B");
+  return `
+    <div class="stats-grid">
+      ${stat("Пробные", trials.length, isAdmin() ? "все заявки" : "мои группы")}
+      ${stat("Запланировано", scheduled, "ждут урок")}
+      ${stat("A свободно", openA, "мест в группах до 7")}
+      ${stat("B свободно", openB, "мест в группах до 9")}
+    </div>
+    <div class="toolbar">
+      ${isAdmin() ? `<button class="button primary" data-add-trial type="button">+ Пробный урок</button>` : ""}
+      <span class="badge neutral">${isAdmin() ? "автоподбор свободного времени" : "пробные по моим группам"}</span>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Пробные уроки</h3><span class="badge active">${scheduled} активных</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ребенок</th><th>Программа</th><th>Время</th><th>Группа</th><th>Ментор</th><th>Статус</th></tr></thead>
+          <tbody>
+            ${
+              trials
+                .map(
+                  (lesson) => `
+                    <tr>
+                      <td><strong>${lesson.childName}</strong><small>${lesson.parentName} · ${lesson.phone}</small></td>
+                      <td>${programTitle(lesson.program)}<small>${lesson.note || "пробный урок"}</small></td>
+                      <td><strong>${formatDate(lesson.date)}</strong><small>${lesson.day} · ${lesson.time}</small></td>
+                      <td>${lesson.group}<small>${groupOccupancy(lesson.group)}/${groupCapacity(lesson.group)} мест</small></td>
+                      <td>${lesson.mentor}</td>
+                      <td>
+                        <select class="status-select" data-trial-status="${lesson.id}">
+                          ${trialStatusOptions(lesson.status)}
+                        </select>
+                      </td>
+                    </tr>`,
+                )
+                .join("") || `<tr><td colspan="6"><div class="empty">Пробные уроки пока не записаны</div></td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function trialStatusOptions(selected) {
+  return [
+    ["scheduled", "Запланирован"],
+    ["confirmed", "Подтвердили"],
+    ["visited", "Пришел"],
+    ["missed", "Не пришел"],
+    ["converted", "Стал учеником"],
+    ["cancelled", "Отменен"],
+  ]
+    .map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function trialOpenSlots(program) {
+  return (state.schedule || [])
+    .filter((lesson) => groupProgram(lesson.group) === program)
+    .reduce((sum, lesson) => sum + Math.max(0, groupCapacity(lesson.group) - groupOccupancy(lesson.group)), 0);
 }
 
 function attendanceDates(studentIds = visibleStudentIds()) {
@@ -1646,10 +1768,14 @@ function bindViewActions() {
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
   document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
+  document.querySelector("[data-add-trial]")?.addEventListener("click", openTrialModal);
   document.querySelector("[data-add-salary]")?.addEventListener("click", openSalaryModal);
   document.querySelector("[data-add-method]")?.addEventListener("click", openMethodModal);
   document.querySelectorAll("[data-task-status]").forEach((select) => {
     select.addEventListener("change", () => updateTaskStatus(Number(select.dataset.taskStatus), select.value));
+  });
+  document.querySelectorAll("[data-trial-status]").forEach((select) => {
+    select.addEventListener("change", () => updateTrialStatus(Number(select.dataset.trialStatus), select.value));
   });
   document.querySelectorAll("[data-delete-schedule]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("schedule", Number(button.dataset.deleteSchedule)));
@@ -1937,6 +2063,74 @@ function openScheduleModal() {
   });
 }
 
+function openTrialModal() {
+  if (!isAdmin()) return;
+  const defaultSlot = findTrialSlot("A");
+  openModal(
+    "Запись на пробный урок",
+    `<form class="modal-form" id="trialForm">
+      <label>ФИО ребенка<input name="childName" required placeholder="Например, Алихан Ермек" /></label>
+      <label>Родитель<input name="parentName" required placeholder="Имя родителя" /></label>
+      <label>Телефон<input name="phone" required placeholder="+7 777 000 00 00" /></label>
+      <label>Программа
+        <select name="program" id="trialProgram">
+          <option value="A">Программа A · до 7 в группе</option>
+          <option value="B">Программа B · до 9 в группе</option>
+        </select>
+      </label>
+      <label>Желаемая дата<input name="preferredDate" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Автослот<input id="trialSlotPreview" readonly value="${trialSlotText(defaultSlot)}" /></label>
+      <label style="grid-column:1/-1">Заметка<textarea name="note" placeholder="Возраст, опыт, откуда узнали, комментарий администратора"></textarea></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Записать</button>
+      </div>
+    </form>`,
+  );
+  const formEl = modalRoot.querySelector("#trialForm");
+  const updatePreview = () => {
+    const data = Object.fromEntries(new FormData(formEl).entries());
+    modalRoot.querySelector("#trialSlotPreview").value = trialSlotText(findTrialSlot(data.program, data.preferredDate));
+  };
+  formEl.querySelector("#trialProgram").addEventListener("change", updatePreview);
+  formEl.querySelector("[name='preferredDate']").addEventListener("change", updatePreview);
+  formEl.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const trial = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const slot = findTrialSlot(trial.program, trial.preferredDate);
+    if (!slot) {
+      formEl.insertAdjacentHTML("afterbegin", `<div class="form-alert">Нет свободного времени для выбранной программы.</div>`);
+      return;
+    }
+    const payload = {
+      ...trial,
+      id: Date.now(),
+      group: slot.group,
+      day: slot.day,
+      time: slot.time,
+      date: slot.date,
+      mentor: slot.mentor,
+      status: "scheduled",
+      createdBy: currentUser.name,
+    };
+    if (backendEnabled) {
+      await apiRequest("create_trial", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.trialLessons.unshift(payload);
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function trialSlotText(slot) {
+  if (!slot) return "Свободного места нет";
+  return `${formatDate(slot.date)} · ${slot.day} ${slot.time} · ${slot.group} (${slot.occupied}/${slot.capacity})`;
+}
+
 function openSalaryModal() {
   if (!isAdmin()) return;
   openModal(
@@ -2029,6 +2223,19 @@ async function updateTaskStatus(taskId, status) {
   const task = state.tasks.find((item) => Number(item.id) === Number(taskId));
   if (!task) return;
   task.status = status;
+  saveState();
+  render();
+}
+
+async function updateTrialStatus(trialId, status) {
+  if (backendEnabled) {
+    await apiRequest("update_trial_status", { id: trialId, status });
+    await refreshData();
+    return;
+  }
+  const trial = state.trialLessons.find((item) => Number(item.id) === Number(trialId));
+  if (!trial) return;
+  trial.status = status;
   saveState();
   render();
 }
