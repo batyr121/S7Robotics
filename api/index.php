@@ -468,12 +468,13 @@ function recalc_student_subscription(PDO $pdo, int $studentId): void
         $startDate = $stmt->fetchColumn();
     }
 
-    if (!$startDate) {
-        return;
+    if ($startDate) {
+        $stmt = $pdo->prepare('select count(*) from attendance where student_id = ? and status = ? and date >= ?');
+        $stmt->execute([$studentId, 'present', $startDate]);
+    } else {
+        $stmt = $pdo->prepare('select count(*) from attendance where student_id = ? and status = ?');
+        $stmt->execute([$studentId, 'present']);
     }
-
-    $stmt = $pdo->prepare('select count(*) from attendance where student_id = ? and status = ? and date >= ?');
-    $stmt->execute([$studentId, 'present', $startDate]);
     $used = min(8, (int)$stmt->fetchColumn());
     $lessonsLeft = max(0, 8 - $used);
 

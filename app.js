@@ -291,6 +291,14 @@ function subscriptionStatus(student) {
   };
 }
 
+function syncStudentSubscription(studentId) {
+  const student = byId(studentId);
+  if (!student) return null;
+  const sub = subscriptionStatus(student);
+  student.lessonsLeft = sub.remaining;
+  return sub;
+}
+
 function adminSubscriptionAlerts() {
   return visibleStudents().filter((student) => subscriptionStatus(student).needsPayment);
 }
@@ -1944,6 +1952,7 @@ async function toggleAttendance(payload) {
   } else {
     state.attendance = state.attendance.filter((item) => item.id !== record.id);
   }
+  syncStudentSubscription(studentId);
   saveState();
   render();
 }
@@ -2630,6 +2639,7 @@ function openAttendanceModal() {
       return;
     }
     state.attendance.unshift({ ...item, id: Date.now(), studentId: Number(item.studentId) });
+    syncStudentSubscription(item.studentId);
     saveState();
     closeModal();
     render();
@@ -2669,8 +2679,8 @@ function openPaymentModal(selectedStudentId = null) {
     });
     const student = state.students.find((item) => Number(item.id) === Number(payload.studentId));
     if (student) {
-      student.lessonsLeft = 8;
       student.nextPayment = payload.date;
+      syncStudentSubscription(student.id);
     }
     saveState();
     closeModal();
