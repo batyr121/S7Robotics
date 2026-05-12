@@ -32,6 +32,7 @@ try {
         'logout' => logout($pdo, require_user($pdo)),
         'create_user' => create_user($pdo, require_admin($pdo), $input),
         'create_student' => create_student($pdo, require_admin($pdo), $input),
+        'update_student' => update_student($pdo, require_admin($pdo), $input),
         'create_payment' => create_payment($pdo, require_admin($pdo), $input),
         'delete_payment' => delete_payment($pdo, require_admin($pdo), $input),
         'create_expense' => create_expense($pdo, require_admin($pdo), $input),
@@ -328,6 +329,36 @@ function create_student(PDO $pdo, array $admin, array $input): void
     $studentId = (int)$pdo->lastInsertId();
     $stmt = $pdo->prepare('insert into payments (student_id, plan, amount, status, date) values (?, ?, ?, ?, ?)');
     $stmt->execute([$studentId, '8 занятий', (int)($input['amount'] ?? 0), 'paid', $paymentDate]);
+    data_response($pdo, $admin);
+}
+
+function update_student(PDO $pdo, array $admin, array $input): void
+{
+    $studentId = (int)required($input, 'id');
+    $paymentDate = $input['paymentDate'] ?? $input['nextPayment'] ?? date('Y-m-d');
+    $stmt = $pdo->prepare('
+        update students
+        set name = ?, course = ?, group_name = ?, parent = ?, phone = ?, mentor = ?, status = ?, progress = ?, next_payment = ?
+        where id = ?
+    ');
+    $stmt->execute([
+        required($input, 'name'),
+        required($input, 'course'),
+        required($input, 'group'),
+        required($input, 'parent'),
+        required($input, 'phone'),
+        required($input, 'mentor'),
+        $input['status'] ?? 'active',
+        (int)($input['progress'] ?? 10),
+        $paymentDate,
+        $studentId,
+    ]);
+    if ($stmt->rowCount() === 0) {
+        $check = $pdo->prepare('select id from students where id = ?');
+        $check->execute([$studentId]);
+        if (!$check->fetchColumn()) fail('Ученик не найден.', 404);
+    }
+    recalc_student_subscription($pdo, $studentId);
     data_response($pdo, $admin);
 }
 

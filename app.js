@@ -955,6 +955,7 @@ function renderStudents() {
                     <td>
                       <div class="row-actions">
                         <button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button>
+                        ${isAdmin() ? `<button class="button secondary compact" data-edit-student="${student.id}" type="button">Редактировать</button>` : ""}
                         ${isAdmin() ? `<button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>` : ""}
                       </div>
                     </td>
@@ -1844,6 +1845,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-open-student]").forEach((button) => {
     button.addEventListener("click", () => openStudentProfile(Number(button.dataset.openStudent)));
   });
+  document.querySelectorAll("[data-edit-student]").forEach((button) => {
+    button.addEventListener("click", () => openStudentModal(Number(button.dataset.editStudent)));
+  });
   document.querySelectorAll("[data-delete-student]").forEach((button) => {
     button.addEventListener("click", () => deleteStudent(Number(button.dataset.deleteStudent)));
   });
@@ -2537,33 +2541,54 @@ function qualitySelect(name, label, weight) {
     </label>`;
 }
 
-function openStudentModal() {
+function openStudentModal(studentId = null) {
   if (!isAdmin()) return;
+  const editingStudent = studentId ? state.students.find((student) => Number(student.id) === Number(studentId)) : null;
   const template = document.querySelector("#studentFormTemplate").content.cloneNode(true);
   const wrapper = document.createElement("div");
   wrapper.append(template);
-  openModal("Новый ученик", wrapper.innerHTML);
+  openModal(editingStudent ? "Редактировать ученика" : "Новый ученик", wrapper.innerHTML);
   const paymentDateInput = modalRoot.querySelector("[name='paymentDate']");
-  if (paymentDateInput) paymentDateInput.value = new Date().toISOString().slice(0, 10);
+  if (paymentDateInput) paymentDateInput.value = editingStudent?.nextPayment || new Date().toISOString().slice(0, 10);
   const mentorSelect = modalRoot.querySelector("#mentorSelect");
-  mentorSelect.innerHTML = state.users
+  const mentorOptions = state.users
     .filter((user) => user.role === "mentor")
-    .map((user) => `<option>${user.name}</option>`)
-    .join("");
+    .map((user) => user.name);
+  if (editingStudent?.mentor && !mentorOptions.includes(editingStudent.mentor)) mentorOptions.push(editingStudent.mentor);
+  mentorSelect.innerHTML = mentorOptions.map((name) => `<option>${name}</option>`).join("");
+  if (editingStudent) {
+    modalRoot.querySelector("[name='name']").value = editingStudent.name || "";
+    modalRoot.querySelector("[name='course']").value = editingStudent.course || "Программа A";
+    modalRoot.querySelector("[name='group']").value = editingStudent.group || "";
+    modalRoot.querySelector("[name='parent']").value = editingStudent.parent || "";
+    modalRoot.querySelector("[name='phone']").value = editingStudent.phone || "";
+    modalRoot.querySelector("[name='mentor']").value = editingStudent.mentor || "";
+    modalRoot.querySelector("[name='status']").value = editingStudent.status || "active";
+  }
   modalRoot.querySelector("#studentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const student = Object.fromEntries(form.entries());
     const payload = {
       ...student,
-      lessonsLeft: 8,
-      progress: 10,
+      id: editingStudent?.id,
+      lessonsLeft: editingStudent?.lessonsLeft ?? 8,
+      progress: editingStudent?.progress ?? 10,
       nextPayment: student.paymentDate,
     };
     if (backendEnabled) {
-      await apiRequest("create_student", payload);
+      await apiRequest(editingStudent ? "update_student" : "create_student", payload);
       closeModal();
       await refreshData();
+      return;
+    }
+    if (editingStudent) {
+      Object.assign(editingStudent, payload);
+      const sub = subscriptionStatus(editingStudent);
+      editingStudent.lessonsLeft = sub.remaining;
+      saveState();
+      closeModal();
+      render();
       return;
     }
     state.students.unshift({
