@@ -30,6 +30,7 @@ try {
         'register_first_admin' => register_first_admin($pdo, $input),
         'data' => data_response($pdo, require_user($pdo)),
         'logout' => logout($pdo, require_user($pdo)),
+        'update_profile' => update_profile($pdo, require_user($pdo), $input),
         'create_user' => create_user($pdo, require_admin($pdo), $input),
         'create_student' => create_student($pdo, require_admin($pdo), $input),
         'update_student' => update_student($pdo, require_admin($pdo), $input),
@@ -71,6 +72,7 @@ function init_db(PDO $pdo): void
         create table if not exists users (
             id integer primary key autoincrement,
             name text not null,
+            phone text not null default '',
             email text not null unique,
             password_hash text not null,
             role text not null check (role in ('admin', 'mentor', 'parent')),
@@ -232,6 +234,7 @@ function init_db(PDO $pdo): void
         );
     ");
     migrate_users_role_check($pdo);
+    migrate_users_phone($pdo);
 }
 
 function migrate_users_role_check(PDO $pdo): void
@@ -249,18 +252,30 @@ function migrate_users_role_check(PDO $pdo): void
         create table users_new (
             id integer primary key autoincrement,
             name text not null,
+            phone text not null default '',
             email text not null unique,
             password_hash text not null,
             role text not null check (role in ('admin', 'mentor', 'parent')),
             groups_json text not null default '[]',
             created_at text not null default current_timestamp
         );
-        insert into users_new (id, name, email, password_hash, role, groups_json, created_at)
-            select id, name, email, password_hash, role, groups_json, created_at from users;
+        insert into users_new (id, name, phone, email, password_hash, role, groups_json, created_at)
+            select id, name, '', email, password_hash, role, groups_json, created_at from users;
         drop table users;
         alter table users_new rename to users;
     ");
     $pdo->exec('pragma foreign_keys = on');
+}
+
+function migrate_users_phone(PDO $pdo): void
+{
+    $columns = $pdo->query('pragma table_info(users)')->fetchAll();
+    foreach ($columns as $column) {
+        if (($column['name'] ?? '') === 'phone') {
+            return;
+        }
+    }
+    $pdo->exec("alter table users add column phone text not null default ''");
 }
 
 function login(PDO $pdo, array $input): void
@@ -299,12 +314,32 @@ function create_user(PDO $pdo, array $admin, array $input): void
     $role = in_array(($input['role'] ?? 'mentor'), ['admin', 'mentor', 'parent'], true) ? $input['role'] : 'mentor';
     insert_user($pdo, [
         'name' => required($input, 'name'),
+        'phone' => $input['phone'] ?? '',
         'email' => required($input, 'email'),
         'password' => required($input, 'password'),
         'role' => $role,
         'groups' => $role === 'admin' ? [] : ($role === 'parent' ? normalize_groups($input['childIds'] ?? $input['groups'] ?? []) : normalize_groups($input['groups'] ?? [])),
     ]);
     data_response($pdo, $admin);
+}
+
+function update_profile(PDO $pdo, array $user, array $input): void
+{
+    $name = trim((string)required($input, 'name'));
+    $phone = trim((string)($input['phone'] ?? ''));
+    $password = trim((string)($input['password'] ?? ''));
+    if ($password !== '' && strlen($password) < 4) {
+        fail('Пароль должен быть минимум 4 символа.', 422);
+    }
+    if ($password !== '') {
+        $stmt = $pdo->prepare('update users set name = ?, phone = ?, password_hash = ? where id = ?');
+        $stmt->execute([$name, $phone, password_hash($password, PASSWORD_DEFAULT), (int)$user['id']]);
+    } else {
+        $stmt = $pdo->prepare('update users set name = ?, phone = ? where id = ?');
+        $stmt->execute([$name, $phone, (int)$user['id']]);
+    }
+    $updated = get_user_by_id($pdo, (int)$user['id']);
+    data_response($pdo, $updated);
 }
 
 function create_student(PDO $pdo, array $admin, array $input): void
@@ -375,11 +410,41 @@ function create_payment(PDO $pdo, array $admin, array $input): void
         $date,
     ]);
     if (($input['status'] ?? 'paid') === 'paid') {
-        $stmt = $pdo->prepare('update students set lessons_left = 8, next_payment = ? where id = ?');
-        $stmt->execute([$date, $studentId]);
+        $visits = plan_visits((string)$input['plan']);
+        $stmt = $pdo->prepare('update students set lessons_left = lessons_left + ?, next_payment = ? where id = ?');
+        $stmt->execute([$visits, $date, $studentId]);
         recalc_student_subscription($pdo, $studentId);
     }
     data_response($pdo, $admin);
+}
+
+function plan_visits(string $plan): int
+{
+    if (preg_match('/(\d+)/u', $plan, $matches)) {
+        return max(1, (int)$matches[1]);
+    }
+    if (preg_match('/проб/ui', $plan)) {
+        return 1;
+    }
+    return 8;
+}
+
+function paid_lessons_total(PDO $pdo, int $studentId): int
+{
+    $stmt = $pdo->prepare('select plan from payments where student_id = ? and status = ? order by date asc, id asc');
+    $stmt->execute([$studentId, 'paid']);
+    $total = 0;
+    foreach ($stmt->fetchAll() as $payment) {
+        $total += plan_visits((string)$payment['plan']);
+    }
+    return $total;
+}
+
+function first_paid_payment_date(PDO $pdo, int $studentId): string
+{
+    $stmt = $pdo->prepare('select date from payments where student_id = ? and status = ? order by date asc, id asc limit 1');
+    $stmt->execute([$studentId, 'paid']);
+    return (string)($stmt->fetchColumn() ?: '');
 }
 
 function delete_payment(PDO $pdo, array $admin, array $input): void
@@ -459,9 +524,8 @@ function toggle_attendance(PDO $pdo, array $user, array $input): void
 
 function recalc_student_subscription(PDO $pdo, int $studentId): void
 {
-    $stmt = $pdo->prepare('select date from payments where student_id = ? and status = ? order by date desc, id desc limit 1');
-    $stmt->execute([$studentId, 'paid']);
-    $startDate = $stmt->fetchColumn();
+    $paidTotal = paid_lessons_total($pdo, $studentId);
+    $startDate = first_paid_payment_date($pdo, $studentId);
     if (!$startDate) {
         $stmt = $pdo->prepare('select next_payment from students where id = ?');
         $stmt->execute([$studentId]);
@@ -475,8 +539,9 @@ function recalc_student_subscription(PDO $pdo, int $studentId): void
         $stmt = $pdo->prepare('select count(*) from attendance where student_id = ? and status = ?');
         $stmt->execute([$studentId, 'present']);
     }
-    $used = min(8, (int)$stmt->fetchColumn());
-    $lessonsLeft = max(0, 8 - $used);
+    $used = (int)$stmt->fetchColumn();
+    $totalLessons = max(8, $paidTotal);
+    $lessonsLeft = max(0, $totalLessons - $used);
 
     $stmt = $pdo->prepare('update students set lessons_left = ? where id = ?');
     $stmt->execute([$lessonsLeft, $studentId]);
@@ -1080,9 +1145,10 @@ function insert_user(PDO $pdo, array $user): int
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         fail('Некорректный email.', 422);
     }
-    $stmt = $pdo->prepare('insert into users (name, email, password_hash, role, groups_json) values (?, ?, ?, ?, ?)');
+    $stmt = $pdo->prepare('insert into users (name, phone, email, password_hash, role, groups_json) values (?, ?, ?, ?, ?, ?)');
     $stmt->execute([
         trim((string)$user['name']),
+        trim((string)($user['phone'] ?? '')),
         $email,
         password_hash((string)$user['password'], PASSWORD_DEFAULT),
         $user['role'],
@@ -1175,6 +1241,7 @@ function public_user(array $user): array
     return [
         'id' => (int)$user['id'],
         'name' => $user['name'],
+        'phone' => $user['phone'] ?? '',
         'email' => $user['email'],
         'role' => $user['role'],
         'groups' => user_groups($user),

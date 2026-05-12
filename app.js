@@ -80,6 +80,7 @@ function loadState() {
 
 function normalizeState(nextState) {
   nextState.users = nextState.users || [];
+  nextState.users = nextState.users.map((user) => ({ phone: "", ...user }));
   nextState.students = nextState.students || [];
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
@@ -262,6 +263,16 @@ function studentPayments(studentId) {
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
+function paymentVisitCount(plan = "") {
+  const match = String(plan).match(/\d+/);
+  if (match) return Math.max(1, Number(match[0]));
+  return String(plan).toLowerCase().includes("проб") ? 1 : 8;
+}
+
+function studentPaidLessonTotal(studentId) {
+  return studentPayments(studentId).reduce((sum, payment) => sum + paymentVisitCount(payment.plan), 0);
+}
+
 function studentPresentAttendance(studentId) {
   return (state.attendance || [])
     .filter((item) => Number(item.studentId) === Number(studentId) && item.status === "present")
@@ -269,21 +280,25 @@ function studentPresentAttendance(studentId) {
 }
 
 function subscriptionStatus(student) {
-  const lastPayment = studentPayments(student.id)[0];
-  const startDate = lastPayment?.date || student.nextPayment || null;
+  const payments = studentPayments(student.id);
+  const lastPayment = payments[0];
+  const firstPayment = payments.at(-1);
+  const startDate = firstPayment?.date || student.nextPayment || null;
   const visits = startDate
     ? studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))
     : studentPresentAttendance(student.id);
-  const used = Math.min(visits.length, 8);
-  const remaining = Math.max(0, 8 - used);
-  const nextPaymentDate = estimateNextPaymentDate(student, startDate, used);
-  const needsPayment = used >= 7;
-  const expired = used >= 8;
+  const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + visits.length);
+  const used = Math.min(visits.length, totalLessons);
+  const remaining = Math.max(0, totalLessons - used);
+  const nextPaymentDate = estimateNextPaymentDate(student, startDate, used, totalLessons);
+  const needsPayment = remaining <= 1;
+  const expired = remaining <= 0;
   return {
     startDate,
+    totalLessons,
     used,
     remaining,
-    visitLabel: `${used}/8`,
+    visitLabel: `${used}/${totalLessons}`,
     needsPayment,
     expired,
     nextPaymentDate,
@@ -303,11 +318,12 @@ function adminSubscriptionAlerts() {
   return visibleStudents().filter((student) => subscriptionStatus(student).needsPayment);
 }
 
-function estimateNextPaymentDate(student, startDate, used) {
+function estimateNextPaymentDate(student, startDate, used, totalLessons = 8) {
   if (!startDate) return student.nextPayment || "";
-  if (used >= 7) {
-    const seventhVisit = studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))[6];
-    if (seventhVisit) return seventhVisit.date;
+  const warningVisit = Math.max(1, totalLessons - 1);
+  if (used >= warningVisit) {
+    const paymentVisit = studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))[warningVisit - 1];
+    if (paymentVisit) return paymentVisit.date;
   }
   const lessonDays = groupLessonDays(student.group);
   let count = 0;
@@ -315,7 +331,7 @@ function estimateNextPaymentDate(student, startDate, used) {
   for (let i = 0; i < 120; i += 1) {
     if (lessonDays.has(cursor.getDay())) {
       count += 1;
-      if (count === 7) return cursor.toISOString().slice(0, 10);
+      if (count === warningVisit) return cursor.toISOString().slice(0, 10);
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -1298,6 +1314,7 @@ function renderParentPortal() {
   return `
     <div class="toolbar">
       <button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>
+      ${isParent() ? `<button class="button secondary" data-edit-profile type="button">Редактировать профиль</button>` : ""}
       ${isAdmin() ? `<button class="button secondary" data-add-announcement type="button">+ Новость / скидка</button>` : ""}
       <span class="badge neutral">семейный кабинет</span>
     </div>
@@ -1701,7 +1718,7 @@ function renderTeam() {
                   <span><strong>${user.role === "admin" ? "Все" : user.groups.length}</strong>${user.role === "parent" ? "дети" : "группы"}</span>
                   <span><strong>${count}</strong>${user.role === "parent" ? "детей" : "учеников"}</span>
                   <span><strong>${user.email}</strong>email</span>
-                  <span><strong>${user.role}</strong>доступ</span>
+                  <span><strong>${user.phone || "не указан"}</strong>телефон</span>
                 </div>
                 ${isAdmin() && user.id !== currentUser.id ? `<button class="button danger compact profile-delete" data-delete-user="${user.id}" type="button">Удалить аккаунт</button>` : ""}
               </article>`;
@@ -1876,6 +1893,7 @@ function bindViewActions() {
   });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
+  document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
   document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
   document.querySelector("[data-add-trial]")?.addEventListener("click", openTrialModal);
@@ -2041,12 +2059,49 @@ function closeModal() {
   modalRoot.innerHTML = "";
 }
 
+function openProfileModal() {
+  if (!currentUser) return;
+  openModal(
+    "Мой профиль",
+    `<form class="modal-form" id="profileForm">
+      <label>ФИО<input name="name" required value="${currentUser.name || ""}" /></label>
+      <label>Телефон<input name="phone" value="${currentUser.phone || ""}" placeholder="+7 777 000 00 00" /></label>
+      <label style="grid-column:1/-1">Новый пароль<input name="password" type="password" minlength="4" placeholder="Оставьте пустым, если не меняете" /></label>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сохранить</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#profileForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const profile = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("update_profile", profile);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    const user = state.users.find((item) => Number(item.id) === Number(currentUser.id));
+    if (user) {
+      user.name = profile.name.trim();
+      user.phone = profile.phone.trim();
+      if (profile.password) user.password = profile.password;
+      currentUser = user;
+    }
+    saveState();
+    closeModal();
+    renderShell();
+  });
+}
+
 function openUserModal() {
   if (!isAdmin()) return;
   openModal(
     "Новый аккаунт",
     `<form class="modal-form" id="userForm">
       <label>Имя<input name="name" required placeholder="Имя и фамилия" /></label>
+      <label>Телефон<input name="phone" placeholder="+7 777 000 00 00" /></label>
       <label>Email<input name="email" type="email" required placeholder="mentor@s7.kz" /></label>
       <label>Пароль<input name="password" type="password" required minlength="4" placeholder="Временный пароль" /></label>
       <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="parent">Родитель</option><option value="admin">Админ</option></select></label>
@@ -2078,6 +2133,7 @@ function openUserModal() {
     const user = {
       id: Date.now(),
       name: form.name.trim(),
+      phone: form.phone.trim(),
       email,
       password: form.password,
       role: form.role,
