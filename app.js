@@ -7,6 +7,7 @@ const seed = {
   users: [],
   students: [],
   payments: [],
+  expenses: [],
   attendance: [],
   feedback: [],
   schedule: [],
@@ -66,6 +67,7 @@ function normalizeState(nextState) {
   nextState.users = nextState.users || [];
   nextState.students = nextState.students || [];
   nextState.payments = nextState.payments || [];
+  nextState.expenses = nextState.expenses || [];
   nextState.feedback = nextState.feedback || [];
   nextState.schedule = nextState.schedule || [];
   nextState.trialLessons = nextState.trialLessons || [];
@@ -1139,26 +1141,40 @@ function attendanceCell(studentId, date, records) {
 
 function renderPayments() {
   if (!isAdmin()) return `<div class="empty">Абонементы доступны только администратору.</div>`;
-  const total = state.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const billedTotal = state.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paidTotal = state.payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + payment.amount, 0);
+  const expenses = (state.expenses || []).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const net = paidTotal - expenses;
   return `
     <div class="stats-grid">
-      ${stat("Начислено", formatMoney(total), "все абонементы")}
-      ${stat("Оплачено", state.payments.filter((p) => p.status === "paid").length, "закрытые счета")}
-      ${stat("Скоро оплата", state.payments.filter((p) => p.status === "soon").length, "напомнить")}
-      ${stat("Просрочено", state.payments.filter((p) => p.status === "overdue").length, "связаться")}
+      ${stat("Оплачено", formatMoney(paidTotal), "фактический доход")}
+      ${stat("Начислено", formatMoney(billedTotal), "все счета")}
+      ${stat("Расход", formatMoney(expenses), "траты центра")}
+      ${stat("Остаток", formatMoney(net), "оплаты минус расходы")}
     </div>
-    <article class="card">
-      <div class="card-header">
-        <h3>Абонементы и оплаты</h3>
-        <div class="filters">
-          <button class="button ghost" data-export-payments type="button">Экспорт CSV</button>
-          <button class="button primary" data-add-payment type="button">+ Оплата</button>
+    <div class="module-grid">
+      <article class="card">
+        <div class="card-header">
+          <h3>Абонементы и оплаты</h3>
+          <div class="filters">
+            <button class="button ghost" data-export-payments type="button">Экспорт CSV</button>
+            <button class="button primary" data-add-payment type="button">+ Оплата</button>
+          </div>
         </div>
-      </div>
-      <div class="card-body list">
-        ${state.payments.map((payment) => paymentRow(payment)).join("")}
-      </div>
-    </article>
+        <div class="card-body list">
+          ${state.payments.map((payment) => paymentRow(payment)).join("") || `<div class="empty">Оплат пока нет</div>`}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header">
+          <h3>Траты средств</h3>
+          <button class="button primary" data-add-expense type="button">+ Трата</button>
+        </div>
+        <div class="card-body list">
+          ${(state.expenses || []).map((expense) => expenseRow(expense)).join("") || `<div class="empty">Расходы пока не добавлены</div>`}
+        </div>
+      </article>
+    </div>
   `;
 }
 
@@ -1175,8 +1191,36 @@ function paymentRow(payment) {
       <div>
         <strong>${formatMoney(payment.amount)}</strong>
         <span class="badge ${payment.status}">${statusText[payment.status]}</span>
+        ${isAdmin() ? `<button class="button danger compact" data-delete-payment="${payment.id}" type="button">Удалить</button>` : ""}
       </div>
     </div>`;
+}
+
+function expenseRow(expense) {
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${expense.title}</strong>
+        <small>${expenseCategoryLabel(expense.category)} · ${formatDate(expense.date)}${expense.createdBy ? ` · ${expense.createdBy}` : ""}</small>
+        ${expense.note ? `<small>${expense.note}</small>` : ""}
+      </div>
+      <div>
+        <strong>${formatMoney(expense.amount)}</strong>
+        <button class="button danger compact" data-delete-expense="${expense.id}" type="button">Удалить</button>
+      </div>
+    </div>`;
+}
+
+function expenseCategoryLabel(category) {
+  const labels = {
+    rent: "Аренда",
+    salary: "Зарплата",
+    equipment: "Оборудование",
+    marketing: "Маркетинг",
+    utilities: "Коммунальные",
+    other: "Другое",
+  };
+  return labels[category] || "Другое";
 }
 
 function renderFeedback() {
@@ -1761,6 +1805,12 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-task]").forEach((button) => {
     button.addEventListener("click", () => deleteTask(Number(button.dataset.deleteTask)));
   });
+  document.querySelectorAll("[data-delete-payment]").forEach((button) => {
+    button.addEventListener("click", () => deletePayment(Number(button.dataset.deletePayment)));
+  });
+  document.querySelectorAll("[data-delete-expense]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("expense", Number(button.dataset.deleteExpense)));
+  });
   document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
   });
@@ -1800,6 +1850,7 @@ function bindViewActions() {
   });
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
+  document.querySelector("[data-add-expense]")?.addEventListener("click", openExpenseModal);
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
   document.querySelector("[data-add-parent-review]")?.addEventListener("click", () => openParentReviewModal());
   document.querySelector("[data-add-announcement]")?.addEventListener("click", () => openAnnouncementModal());
@@ -2202,6 +2253,7 @@ async function deleteRecord(type, id) {
     salary: ["delete_salary", "salaries"],
     method: ["delete_method", "methods"],
     announcement: ["delete_announcement", "announcements"],
+    expense: ["delete_expense", "expenses"],
   };
   const [action, key] = map[type];
   if (backendEnabled) {
@@ -2249,6 +2301,25 @@ async function deleteTask(taskId) {
     return;
   }
   state.tasks = state.tasks.filter((item) => Number(item.id) !== Number(taskId));
+  saveState();
+  render();
+}
+
+async function deletePayment(paymentId) {
+  const payment = state.payments.find((item) => Number(item.id) === Number(paymentId));
+  if (!payment || !confirm(`Удалить оплату ${formatMoney(payment.amount)}?`)) return;
+  if (backendEnabled) {
+    await apiRequest("delete_payment", { id: paymentId });
+    await refreshData();
+    return;
+  }
+  state.payments = state.payments.filter((item) => Number(item.id) !== Number(paymentId));
+  const student = byId(payment.studentId);
+  if (student) {
+    const sub = subscriptionStatus(student);
+    student.lessonsLeft = sub.remaining;
+    student.nextPayment = sub.startDate || student.nextPayment;
+  }
   saveState();
   render();
 }
@@ -2534,6 +2605,52 @@ function openPaymentModal(selectedStudentId = null) {
   });
 }
 
+function openExpenseModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Новая трата",
+    `<form class="modal-form" id="expenseForm">
+      <label>Название<input name="title" required placeholder="Например: набор Arduino" /></label>
+      <label>Сумма<input name="amount" type="number" min="0" required placeholder="35000" /></label>
+      <label>Категория
+        <select name="category">
+          <option value="equipment">Оборудование</option>
+          <option value="salary">Зарплата</option>
+          <option value="rent">Аренда</option>
+          <option value="marketing">Маркетинг</option>
+          <option value="utilities">Коммунальные</option>
+          <option value="other">Другое</option>
+        </select>
+      </label>
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label style="grid-column:1/-1">Пояснение<textarea name="note" placeholder="Зачем потратили, номер чека, кто согласовал"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#expenseForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const expense = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const payload = {
+      ...expense,
+      amount: Number(expense.amount),
+    };
+    if (backendEnabled) {
+      await apiRequest("create_expense", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.expenses.unshift({
+      ...payload,
+      id: Date.now(),
+      createdBy: currentUser.name,
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
 function openFeedbackModal(selectedStudentId = null) {
   openModal(
     "Фидбек ученику",
@@ -2672,7 +2789,19 @@ function exportPaymentsCsv() {
       statusText[payment.status],
     ]);
   });
-  downloadCsv("s7-payments.csv", rows);
+  rows.push([]);
+  rows.push(["Расход", "Категория", "Сумма", "Дата", "Пояснение", "Добавил"]);
+  (state.expenses || []).forEach((expense) => {
+    rows.push([
+      expense.title,
+      expenseCategoryLabel(expense.category),
+      expense.amount,
+      expense.date,
+      expense.note || "",
+      expense.createdBy || "",
+    ]);
+  });
+  downloadCsv("s7-finance.csv", rows);
 }
 
 function downloadCsv(filename, rows) {

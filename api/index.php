@@ -33,6 +33,9 @@ try {
         'create_user' => create_user($pdo, require_admin($pdo), $input),
         'create_student' => create_student($pdo, require_admin($pdo), $input),
         'create_payment' => create_payment($pdo, require_admin($pdo), $input),
+        'delete_payment' => delete_payment($pdo, require_admin($pdo), $input),
+        'create_expense' => create_expense($pdo, require_admin($pdo), $input),
+        'delete_expense' => delete_simple($pdo, require_admin($pdo), $input, 'expenses'),
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
@@ -99,6 +102,16 @@ function init_db(PDO $pdo): void
             amount integer not null,
             status text not null,
             date text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists expenses (
+            id integer primary key autoincrement,
+            title text not null,
+            amount integer not null,
+            category text not null,
+            date text not null,
+            note text,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
         create table if not exists attendance (
@@ -335,6 +348,33 @@ function create_payment(PDO $pdo, array $admin, array $input): void
         $stmt->execute([$date, $studentId]);
         recalc_student_subscription($pdo, $studentId);
     }
+    data_response($pdo, $admin);
+}
+
+function delete_payment(PDO $pdo, array $admin, array $input): void
+{
+    $paymentId = (int)required($input, 'id');
+    $stmt = $pdo->prepare('select student_id from payments where id = ?');
+    $stmt->execute([$paymentId]);
+    $studentId = $stmt->fetchColumn();
+    if (!$studentId) fail('Оплата не найдена.', 404);
+    $stmt = $pdo->prepare('delete from payments where id = ?');
+    $stmt->execute([$paymentId]);
+    recalc_student_subscription($pdo, (int)$studentId);
+    data_response($pdo, $admin);
+}
+
+function create_expense(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into expenses (title, amount, category, date, note, created_by) values (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'title'),
+        (int)required($input, 'amount'),
+        required($input, 'category'),
+        required($input, 'date'),
+        $input['note'] ?? '',
+        $admin['name'],
+    ]);
     data_response($pdo, $admin);
 }
 
@@ -780,7 +820,7 @@ function create_announcement(PDO $pdo, array $admin, array $input): void
 
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods', 'announcements'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -802,6 +842,7 @@ function state_for_user(PDO $pdo, array $user): array
         'users' => $isAdmin ? all_users($pdo) : [public_user($user)],
         'students' => $students,
         'payments' => $isAdmin ? all_payments($pdo) : ($isParent ? rows_for_ids($pdo, 'payments', $ids) : []),
+        'expenses' => $isAdmin ? all_expenses($pdo) : [],
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
         'schedule' => $isAdmin ? all_schedule($pdo) : ($isParent ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
@@ -849,6 +890,11 @@ function parent_students(PDO $pdo, array $user): array
 function all_payments(PDO $pdo): array
 {
     return array_map('payment_row', $pdo->query('select * from payments order by date desc, id desc')->fetchAll());
+}
+
+function all_expenses(PDO $pdo): array
+{
+    return array_map('expense_row', $pdo->query('select * from expenses order by date desc, id desc')->fetchAll());
 }
 
 function all_schedule(PDO $pdo): array
@@ -1143,6 +1189,19 @@ function payment_row(array $row): array
         'amount' => (int)$row['amount'],
         'status' => $row['status'],
         'date' => $row['date'],
+    ];
+}
+
+function expense_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'title' => $row['title'],
+        'amount' => (int)$row['amount'],
+        'category' => $row['category'],
+        'date' => $row['date'],
+        'note' => $row['note'] ?? '',
+        'createdBy' => $row['created_by'],
     ];
 }
 
