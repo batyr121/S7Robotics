@@ -2,6 +2,21 @@ const STORAGE_KEY = "s7robotics-crm-v3";
 const SESSION_KEY = "s7robotics-session-v1";
 const API_URL = "api/index.php";
 const TOKEN_KEY = "s7robotics-api-token";
+const SEASON_LEVEL_XP = 1000;
+const SEASON_REWARDS = [
+  { level: 1, title: "Старт сезона", text: "цифровой бейдж ученика S7" },
+  { level: 2, title: "5% скидка", text: "на следующий абонемент" },
+  { level: 3, title: "3D принтер", text: "30 минут печати проекта" },
+  { level: 4, title: "Проектный чек", text: "разбор идеи с ментором" },
+  { level: 5, title: "Мастер-класс", text: "закрытый урок по роботам" },
+  { level: 6, title: "S7 мерч", text: "наклейки и карточка инженера" },
+  { level: 7, title: "10% скидка", text: "на абонемент или интенсив" },
+  { level: 8, title: "3D печать+", text: "60 минут на принтере" },
+  { level: 9, title: "Лаб-день", text: "доступ к оборудованию центра" },
+  { level: 10, title: "Консультация", text: "с мастером по проекту" },
+  { level: 11, title: "Семейный бонус", text: "приглашение на демо-день" },
+  { level: 12, title: "Финал сезона", text: "15% скидка и витрина проекта" },
+];
 
 const seed = {
   users: [],
@@ -1270,6 +1285,7 @@ function renderParentPortal() {
   const students = visibleStudents();
   const reviews = visibleParentReviews();
   const weekly = weeklyPassProgress();
+  const season = seasonPassProgress(weekly);
   return `
     <div class="toolbar">
       <button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>
@@ -1294,26 +1310,27 @@ function renderParentPortal() {
       ${students.map((student) => parentStudentCard(student)).join("") || `<div class="empty">Админ еще не привязал детей к аккаунту родителя.</div>`}
     </div>
     <article class="card">
-      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">обновляется еженедельно</span></div>
+      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">1000 XP за уровень</span></div>
       <div class="weekly-pass">
         <div>
-          <span>Неделя ${weekly.week}</span>
-          <strong>${weekly.done}/${weekly.total} миссий закрыто</strong>
-          <small>${weekly.xp} XP недели · награды открываются по заполнению шкалы</small>
+          <span>Сезонный уровень ${season.level}</span>
+          <strong>${season.levelXp}/${SEASON_LEVEL_XP} XP до следующего уровня</strong>
+          <small>Неделя ${weekly.week} · ${season.totalXp} XP всего · ${season.nextReward ? `следующая награда: ${season.nextReward.title}` : "главная награда сезона открыта"}</small>
         </div>
         <div class="weekly-meter" aria-label="Заполнение сезонного пропуска">
-          <span style="width:${weekly.percent}%"></span>
+          <span style="width:${season.percent}%"></span>
         </div>
+      </div>
+      <div class="season-summary">
+        ${stat("Недельные миссии", `${weekly.done}/${weekly.total}`, `+${weekly.earnedXp} XP`)}
+        ${stat("Отзывы семьи", `${reviews.length}`, "усиливают pass")}
+        ${stat("Дети", `${students.length}`, "общий семейный прогресс")}
       </div>
       <div class="weekly-missions">
         ${weekly.missions.map((mission) => missionRow(mission)).join("")}
       </div>
       <div class="season-pass">
-        ${seasonReward(20, "5% скидка", "на следующий абонемент")}
-        ${seasonReward(40, "3D принтер", "30 минут печати бесплатно")}
-        ${seasonReward(60, "Мастер-класс", "закрытый воркшоп по роботам")}
-        ${seasonReward(80, "Консультация", "разбор проекта с мастером")}
-        ${seasonReward(100, "10% скидка", "на абонемент или лагерь")}
+        ${SEASON_REWARDS.map((reward) => seasonReward(reward, season.level)).join("")}
       </div>
     </article>
   `;
@@ -1335,6 +1352,15 @@ function parentStudentCard(student) {
         ${stat("Абонемент", `${sub.remaining}/8`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
         ${stat("Уровень", stats.level, `${stats.xp} XP`)}
         ${stat(program.title, `${program.completed}/${program.total}`, `следующий урок ${program.nextLesson}`)}
+      </div>
+      <div class="child-level-panel">
+        <div>
+          <strong>Прогресс уровня</strong>
+          <small>${stats.levelXp}/${SEASON_LEVEL_XP} XP · осталось ${stats.xpToNext} XP</small>
+        </div>
+        <div class="weekly-meter" aria-label="Прогресс уровня ученика">
+          <span style="width:${stats.levelPercent}%"></span>
+        </div>
       </div>
       <div class="program-panel">
         <div>
@@ -1370,23 +1396,29 @@ function childGamification(student) {
   const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id) && item.status === "present");
   const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id));
   const reviews = visibleParentReviews().filter((item) => Number(item.studentId) === Number(student.id));
-  const xp = attendance.length * 20 + feedback.length * 15 + reviews.length * 25 + Number(student.progress || 0);
-  const level = Math.min(10, Math.max(1, Math.floor(xp / 100) + 1));
-  const streak = attendance.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).length;
   const program = programProgress(student);
+  const streak = attendance.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).length;
+  const streakBonus = Math.min(streak, 10) * 25;
+  const xp = attendance.length * 120 + feedback.length * 80 + reviews.length * 100 + Number(student.progress || 0) * 8 + streakBonus;
+  const level = Math.min(20, Math.max(1, Math.floor(xp / SEASON_LEVEL_XP) + 1));
+  const levelXp = xp % SEASON_LEVEL_XP;
+  const levelPercent = Math.round((levelXp / SEASON_LEVEL_XP) * 100);
+  const xpToNext = level >= 20 ? 0 : SEASON_LEVEL_XP - levelXp;
   const missions = [
-    dailyTask("Посетить урок", attendance.length > 0, `${attendance.length} посещений`),
-    dailyTask("Получить фидбек", feedback.length > 0, `${feedback.length} заметок ментора`),
-    dailyTask("Оставить отзыв", reviews.length > 0, `${reviews.length} отзывов семьи`),
-    dailyTask("Закрыть модуль", program.completed >= 8, `${program.completed}/${program.total} уроков`),
+    dailyTask("Посетить урок", attendance.length > 0, `${attendance.length} посещений · +120 XP`),
+    dailyTask("Получить фидбек", feedback.length > 0, `${feedback.length} заметок · +80 XP`),
+    dailyTask("Оставить отзыв", reviews.length > 0, `${reviews.length} отзывов · +100 XP`),
+    dailyTask("Закрыть модуль", program.completed >= 8, `${program.completed}/${program.total} уроков · бонус`),
   ];
   const achievements = [
-    achievement("Первый робот", attendance.length >= 1, "посетить первый урок"),
+    achievement("Первый робот", attendance.length >= 1, "первый урок в сезоне"),
     achievement("Стабильный инженер", attendance.length >= 4, "4 урока в программе"),
-    achievement("Команда с семьей", reviews.length >= 3, "3 отзыва после уроков"),
+    achievement("Семейная команда", reviews.length >= 3, "3 отзыва после уроков"),
     achievement("Половина пути", program.completed >= 17, "17 из 34 уроков"),
+    achievement("Серия 5", streak >= 5, "5 посещений в сезоне"),
+    achievement("Проектный финиш", program.completed >= 34, "закрыть программу A/B"),
   ];
-  return { xp, level, streak, missions, achievements };
+  return { xp, level, levelXp, levelPercent, xpToNext, streak, missions, achievements };
 }
 
 function announcementRow(item) {
@@ -1428,25 +1460,41 @@ function weeklyPassProgress() {
     ? Math.round(students.reduce((sum, student) => sum + programProgress(student).percent, 0) / students.length)
     : 0;
   const missions = [
-    dailyTask("Посетить 2 урока", attendance.length >= 2, `${Math.min(attendance.length, 2)}/2 посещений`),
-    dailyTask("Оставить отзыв", reviews.length >= 1, `${reviews.length} отзывов`),
-    dailyTask("Получить фидбек", feedback.length >= 1, `${feedback.length} заметок ментора`),
-    dailyTask("Продвинуть программу", avgProgram >= 25, `${avgProgram}% среднего прогресса`),
+    dailyTask("2 посещения за неделю", attendance.length >= 2, `${Math.min(attendance.length, 2)}/2 · +180 XP`),
+    dailyTask("Семейный отзыв", reviews.length >= 1, `${reviews.length} отзывов · +120 XP`),
+    dailyTask("Фидбек от ментора", feedback.length >= 1, `${feedback.length} заметок · +120 XP`),
+    dailyTask("Прогресс программы", avgProgram >= 25, `${avgProgram}% среднего пути · +160 XP`),
+    dailyTask("Серия активности", attendance.length >= 4, `${Math.min(attendance.length, 4)}/4 уроков · +220 XP`),
+    dailyTask("Проектная неделя", feedback.length >= 2 && reviews.length >= 1, `${feedback.length} фидбеков и ${reviews.length} отзывов · +200 XP`),
   ];
+  const missionXp = [180, 120, 120, 160, 220, 200];
   const done = missions.filter((mission) => mission.done).length;
   const total = missions.length;
   const percent = Math.round((done / total) * 100);
-  const xp = students.reduce((sum, student) => sum + childGamification(student).xp, 0) + reviews.length * 20;
-  return { week, missions, done, total, percent, xp };
+  const earnedXp = missions.reduce((sum, mission, index) => sum + (mission.done ? missionXp[index] : 0), 0);
+  return { week, missions, done, total, percent, earnedXp };
 }
 
-function seasonReward(percent, title, text) {
-  const weekly = weeklyPassProgress();
+function seasonPassProgress(weekly = weeklyPassProgress()) {
+  const students = visibleStudents();
+  const reviews = visibleParentReviews();
+  const childXp = students.reduce((sum, student) => sum + childGamification(student).xp, 0);
+  const reviewBonus = reviews.reduce((sum, item) => sum + Number(item.bonusPoints || 0), 0);
+  const totalXp = childXp + reviewBonus + weekly.earnedXp;
+  const maxLevel = SEASON_REWARDS[SEASON_REWARDS.length - 1].level;
+  const level = Math.min(maxLevel, Math.max(1, Math.floor(totalXp / SEASON_LEVEL_XP) + 1));
+  const levelXp = level >= maxLevel ? SEASON_LEVEL_XP : totalXp % SEASON_LEVEL_XP;
+  const percent = Math.round((levelXp / SEASON_LEVEL_XP) * 100);
+  const nextReward = SEASON_REWARDS.find((reward) => reward.level > level) || null;
+  return { totalXp, level, levelXp, percent, nextReward };
+}
+
+function seasonReward(reward, currentLevel) {
   return `
-    <div class="season-reward ${weekly.percent >= percent ? "unlocked" : ""}">
-      <span>${percent}%</span>
-      <strong>${title}</strong>
-      <small>${text}</small>
+    <div class="season-reward ${currentLevel >= reward.level ? "unlocked" : ""}">
+      <span>${reward.level}</span>
+      <strong>${reward.title}</strong>
+      <small>${reward.text}</small>
     </div>`;
 }
 

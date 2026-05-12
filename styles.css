@@ -1052,6 +1052,7 @@ select {
   padding: 0 18px 14px;
 }
 
+.child-level-panel,
 .program-panel {
   display: grid;
   gap: 10px;
@@ -1063,11 +1064,21 @@ select {
     linear-gradient(180deg, #ffffff, #f7fbff);
 }
 
+.child-level-panel {
+  border-color: rgba(29, 111, 232, 0.18);
+  background:
+    linear-gradient(135deg, rgba(29, 111, 232, 0.10), rgba(18, 168, 122, 0.08)),
+    white;
+}
+
+.child-level-panel strong,
+.child-level-panel small,
 .program-panel strong,
 .program-panel small {
   display: block;
 }
 
+.child-level-panel small,
 .program-panel small {
   color: var(--muted);
   font-weight: 800;
@@ -1102,7 +1113,7 @@ select {
 
 .season-pass {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   padding: 18px;
 }
@@ -1140,7 +1151,16 @@ select {
 
 .season-reward.unlocked {
   border-color: rgba(18, 168, 122, 0.38);
-  background: #f0fbf6;
+  background:
+    linear-gradient(180deg, rgba(18, 168, 122, 0.10), rgba(240, 251, 246, 0.96)),
+    #f0fbf6;
+}
+
+.season-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 18px 0;
 }
 
 .weekly-pass {
@@ -2029,6 +2049,7 @@ td small {
 
   .lesson-checklist,
   .gamification-grid,
+  .season-summary,
   .weekly-missions,
   .season-pass {
     grid-template-columns: 1fr;
