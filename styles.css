@@ -1757,6 +1757,10 @@ td small {
   color: #b02c3b;
 }
 
+.attendance-history-row .badge {
+  white-space: nowrap;
+}
+
 .day-cell {
   min-height: 112px;
   padding: 10px;

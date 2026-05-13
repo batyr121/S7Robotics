@@ -1152,7 +1152,7 @@ function renderAttendance() {
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
-                      <td><strong>${sub.totalProgressVisits}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small></td>
+                      <td><strong>${sub.totalProgressVisits}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small><button class="button ghost compact" data-attendance-history="${student.id}" type="button">История</button></td>
                     </tr>`;
                 })
                 .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
@@ -2023,6 +2023,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-add-attendance-student]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceModal(Number(button.dataset.addAttendanceStudent)));
   });
+  document.querySelectorAll("[data-attendance-history]").forEach((button) => {
+    button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
+  });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
@@ -2197,6 +2200,51 @@ function openModal(title, content) {
 function closeModal() {
   modalRoot.hidden = true;
   modalRoot.innerHTML = "";
+}
+
+function openAttendanceHistoryModal(studentId) {
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const sub = subscriptionStatus(student);
+  let absentCount = 0;
+  let billableIndex = 0;
+  const rows = studentAttendanceSince(student.id, sub.startDate).map((record) => {
+    let subscriptionLabel = "бесплатное НБ";
+    let slotLabel = "-";
+    if (record.status === "present") {
+      billableIndex += 1;
+      subscriptionLabel = `#${(student.subscriptionNumber || 1) + Math.floor((billableIndex - 1) / 8)}`;
+      slotLabel = `${((billableIndex - 1) % 8) + 1}/8`;
+    } else if (record.status === "absent") {
+      absentCount += 1;
+      if (absentCount > 2) {
+        billableIndex += 1;
+        subscriptionLabel = `#${(student.subscriptionNumber || 1) + Math.floor((billableIndex - 1) / 8)}`;
+        slotLabel = `${((billableIndex - 1) % 8) + 1}/8`;
+      }
+    }
+    return `
+      <div class="list-row attendance-history-row">
+        <div>
+          <strong>${formatDate(record.date)} · ${statusText[record.status]}</strong>
+          <small>${record.topic || "без темы"}</small>
+        </div>
+        <span class="badge ${record.status}">${subscriptionLabel} · ${slotLabel}</span>
+      </div>`;
+  });
+  openModal(
+    `История посещений · ${student.name}`,
+    `<div class="profile-modal">
+      <div class="profile-summary">
+        ${stat("Текущий", `#${sub.currentSubscriptionNumber}`, sub.visitLabel)}
+        ${stat("Всего", sub.totalProgressVisits, "засчитанных занятий")}
+        ${stat("Осталось", sub.remaining, "по оплатам")}
+      </div>
+      <div class="card-body list">
+        ${rows.join("") || `<div class="empty">История посещений пока пустая</div>`}
+      </div>
+    </div>`,
+  );
 }
 
 function openProfileModal() {
