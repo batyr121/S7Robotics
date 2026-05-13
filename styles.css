@@ -1820,6 +1820,155 @@ td small {
   font-weight: 750;
 }
 
+.learning-addons {
+  margin-top: 14px;
+}
+
+.homework-row.done {
+  border-color: rgba(18, 168, 122, 0.22);
+  background: linear-gradient(180deg, rgba(240, 255, 249, 0.92), rgba(247, 250, 255, 0.86));
+}
+
+.photo-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.photo-report-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.photo-report-card img,
+.photo-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: linear-gradient(135deg, var(--blue-600), var(--green));
+}
+
+.photo-placeholder {
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 34px;
+  font-weight: 950;
+}
+
+.photo-report-card > div {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.photo-report-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+  font-weight: 750;
+}
+
+.certificate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.certificate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff, #eef6ff);
+}
+
+.certificate-row > div:first-child {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 10px;
+  align-items: center;
+}
+
+.certificate-row small {
+  grid-column: 2;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.certificate-seal {
+  grid-row: span 3;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue-600), var(--green));
+  color: white;
+  font-weight: 950;
+}
+
+.certificate-paper {
+  padding: 34px;
+  border: 8px solid #e5f0ff;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(29, 111, 232, 0.08), transparent 36%),
+    #ffffff;
+  text-align: center;
+  box-shadow: var(--shadow-soft);
+}
+
+.certificate-top,
+.certificate-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.certificate-top img {
+  width: 72px;
+}
+
+.certificate-kicker {
+  margin: 22px 0 6px;
+  color: var(--blue-600);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.certificate-paper h2 {
+  margin: 0 0 18px;
+  color: var(--blue-950);
+  font-size: 34px;
+}
+
+.certificate-name {
+  display: block;
+  margin: 10px 0;
+  color: var(--blue-950);
+  font-size: 40px;
+}
+
+.certificate-paper small {
+  display: block;
+  max-width: 620px;
+  margin: 16px auto 30px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.certificate-actions {
+  margin-top: 14px;
+}
+
 .day-cell {
   min-height: 112px;
   padding: 10px;
@@ -2152,8 +2301,31 @@ td small {
   .gamification-grid,
   .season-summary,
   .weekly-missions,
-  .season-pass {
+  .season-pass,
+  .photo-report-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .certificate-paper,
+  .certificate-paper * {
+    visibility: visible;
+  }
+
+  .certificate-paper {
+    position: fixed;
+    inset: 18mm;
+    box-shadow: none;
+  }
+
+  .certificate-actions,
+  .modal-head {
+    display: none;
   }
 }
 

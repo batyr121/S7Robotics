@@ -45,6 +45,13 @@ try {
         'parent_qr_attendance' => parent_qr_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
+        'create_homework' => create_homework($pdo, require_user($pdo), $input),
+        'update_homework_status' => update_homework_status($pdo, require_user($pdo), $input),
+        'delete_homework' => delete_homework($pdo, require_user($pdo), $input),
+        'create_photo_report' => create_photo_report($pdo, require_user($pdo), $input),
+        'delete_photo_report' => delete_photo_report($pdo, require_user($pdo), $input),
+        'create_certificate' => create_certificate($pdo, require_admin($pdo), $input),
+        'delete_certificate' => delete_simple($pdo, require_admin($pdo), $input, 'certificates'),
         'create_parent_review' => create_parent_review($pdo, require_user($pdo), $input),
         'create_lesson_check' => create_lesson_check($pdo, require_user($pdo), $input),
         'create_task' => create_task($pdo, require_user($pdo), $input),
@@ -141,6 +148,38 @@ function init_db(PDO $pdo): void
             text text not null,
             date text not null,
             created_by integer references users(id) on delete set null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists homework (
+            id integer primary key autoincrement,
+            student_id integer not null references students(id) on delete cascade,
+            title text not null,
+            text text not null,
+            due_date text,
+            status text not null default 'assigned',
+            created_by text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists photo_reports (
+            id integer primary key autoincrement,
+            student_id integer not null references students(id) on delete cascade,
+            mentor text not null,
+            title text not null,
+            text text not null,
+            photo_url text,
+            date text not null,
+            created_by integer references users(id) on delete set null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists certificates (
+            id integer primary key autoincrement,
+            student_id integer not null references students(id) on delete cascade,
+            program text not null,
+            title text not null,
+            issued_at text not null,
+            certificate_no text not null,
+            note text,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
         create table if not exists schedule (
@@ -688,6 +727,123 @@ function create_feedback(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function create_homework(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Домашние задания создает ментор или администратор.', 403);
+    }
+    $studentIds = array_map('intval', (array)($input['studentIds'] ?? [$input['studentId'] ?? 0]));
+    $studentIds = array_values(array_filter($studentIds));
+    if (!$studentIds) fail('Выберите хотя бы одного ученика.', 422);
+    $stmt = $pdo->prepare('insert into homework (student_id, title, text, due_date, status, created_by) values (?, ?, ?, ?, ?, ?)');
+    foreach ($studentIds as $studentId) {
+        assert_student_access($pdo, $user, $studentId);
+        $stmt->execute([
+            $studentId,
+            required($input, 'title'),
+            required($input, 'text'),
+            $input['dueDate'] ?? '',
+            'assigned',
+            $user['name'],
+        ]);
+    }
+    data_response($pdo, $user);
+}
+
+function update_homework_status(PDO $pdo, array $user, array $input): void
+{
+    $homeworkId = (int)required($input, 'id');
+    $status = in_array(($input['status'] ?? 'done'), ['assigned', 'done'], true) ? $input['status'] : 'done';
+    $stmt = $pdo->prepare('select * from homework where id = ?');
+    $stmt->execute([$homeworkId]);
+    $homework = $stmt->fetch();
+    if (!$homework) fail('Домашнее задание не найдено.', 404);
+    assert_student_access($pdo, $user, (int)$homework['student_id']);
+    if ($user['role'] === 'parent' && $status !== 'done') {
+        fail('Родитель может только отметить выполнение.', 403);
+    }
+    $stmt = $pdo->prepare('update homework set status = ? where id = ?');
+    $stmt->execute([$status, $homeworkId]);
+    data_response($pdo, $user);
+}
+
+function delete_homework(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Родитель не может удалять домашние задания.', 403);
+    }
+    $homeworkId = (int)required($input, 'id');
+    $stmt = $pdo->prepare('select * from homework where id = ?');
+    $stmt->execute([$homeworkId]);
+    $homework = $stmt->fetch();
+    if (!$homework) fail('Домашнее задание не найдено.', 404);
+    assert_student_access($pdo, $user, (int)$homework['student_id']);
+    $stmt = $pdo->prepare('delete from homework where id = ?');
+    $stmt->execute([$homeworkId]);
+    data_response($pdo, $user);
+}
+
+function create_photo_report(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Фотоотчет создает ментор или администратор.', 403);
+    }
+    $studentId = (int)required($input, 'studentId');
+    assert_student_access($pdo, $user, $studentId);
+    $student = get_student($pdo, $studentId);
+    $mentor = $user['role'] === 'admin' ? ($input['mentor'] ?? $student['mentor']) : $user['name'];
+    $stmt = $pdo->prepare('insert into photo_reports (student_id, mentor, title, text, photo_url, date, created_by) values (?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $studentId,
+        $mentor,
+        required($input, 'title'),
+        required($input, 'text'),
+        $input['photoUrl'] ?? '',
+        $input['date'] ?? date('Y-m-d'),
+        (int)$user['id'],
+    ]);
+    data_response($pdo, $user);
+}
+
+function delete_photo_report(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Родитель не может удалять фотоотчеты.', 403);
+    }
+    $reportId = (int)required($input, 'id');
+    $stmt = $pdo->prepare('select * from photo_reports where id = ?');
+    $stmt->execute([$reportId]);
+    $report = $stmt->fetch();
+    if (!$report) fail('Фотоотчет не найден.', 404);
+    assert_student_access($pdo, $user, (int)$report['student_id']);
+    $stmt = $pdo->prepare('delete from photo_reports where id = ?');
+    $stmt->execute([$reportId]);
+    data_response($pdo, $user);
+}
+
+function create_certificate(PDO $pdo, array $admin, array $input): void
+{
+    $studentId = (int)required($input, 'studentId');
+    $student = get_student($pdo, $studentId);
+    $program = $input['program'] ?? (preg_match('/b/ui', $student['course'] . ' ' . $student['group_name']) ? 'B' : 'A');
+    $stmt = $pdo->prepare('insert into certificates (student_id, program, title, issued_at, certificate_no, note, created_by) values (?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $studentId,
+        $program,
+        $input['title'] ?? 'Сертификат об окончании программы',
+        $input['issuedAt'] ?? date('Y-m-d'),
+        $input['certificateNo'] ?? certificate_no($studentId),
+        $input['note'] ?? '',
+        $admin['name'],
+    ]);
+    data_response($pdo, $admin);
+}
+
+function certificate_no(int $studentId): string
+{
+    return 'S7-' . date('ymd') . '-' . str_pad((string)$studentId, 4, '0', STR_PAD_LEFT);
+}
+
 function create_parent_review(PDO $pdo, array $user, array $input): void
 {
     if ($user['role'] !== 'parent' && $user['role'] !== 'admin') {
@@ -1038,7 +1194,7 @@ function create_announcement(PDO $pdo, array $admin, array $input): void
 
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'trial_lessons'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'trial_lessons', 'certificates'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -1063,6 +1219,9 @@ function state_for_user(PDO $pdo, array $user): array
         'expenses' => $isAdmin ? all_expenses($pdo) : [],
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
+        'homework' => rows_for_ids($pdo, 'homework', $ids),
+        'photoReports' => rows_for_ids($pdo, 'photo_reports', $ids),
+        'certificates' => rows_for_ids($pdo, 'certificates', $ids),
         'schedule' => $isAdmin ? all_schedule($pdo) : ($isParent ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
         'trialLessons' => $isAdmin ? all_trial_lessons($pdo) : ($isParent ? [] : mentor_trial_lessons($pdo, $user)),
         'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : ($isParent ? [] : mentor_lesson_checks($pdo, $user)),
@@ -1245,10 +1404,21 @@ function rows_for_ids(PDO $pdo, string $table, array $ids): array
 {
     if (!$ids) return [];
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $order = $table === 'payments' ? 'date desc, id desc' : 'date desc, id desc';
+    $order = match ($table) {
+        'homework' => 'due_date desc, id desc',
+        'certificates' => 'issued_at desc, id desc',
+        default => 'date desc, id desc',
+    };
     $stmt = $pdo->prepare("select * from $table where student_id in ($placeholders) order by $order");
     $stmt->execute($ids);
-    $mapper = $table === 'attendance' ? 'attendance_row' : ($table === 'payments' ? 'payment_row' : 'feedback_row');
+    $mapper = match ($table) {
+        'attendance' => 'attendance_row',
+        'payments' => 'payment_row',
+        'homework' => 'homework_row',
+        'photo_reports' => 'photo_report_row',
+        'certificates' => 'certificate_row',
+        default => 'feedback_row',
+    };
     return array_map($mapper, $stmt->fetchAll());
 }
 
@@ -1457,6 +1627,46 @@ function feedback_row(array $row): array
         'skill' => $row['skill'],
         'text' => $row['text'],
         'date' => $row['date'],
+    ];
+}
+
+function homework_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'studentId' => (int)$row['student_id'],
+        'title' => $row['title'],
+        'text' => $row['text'],
+        'dueDate' => $row['due_date'] ?? '',
+        'status' => $row['status'],
+        'createdBy' => $row['created_by'],
+    ];
+}
+
+function photo_report_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'studentId' => (int)$row['student_id'],
+        'mentor' => $row['mentor'],
+        'title' => $row['title'],
+        'text' => $row['text'],
+        'photoUrl' => $row['photo_url'] ?? '',
+        'date' => $row['date'],
+    ];
+}
+
+function certificate_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'studentId' => (int)$row['student_id'],
+        'program' => $row['program'],
+        'title' => $row['title'],
+        'issuedAt' => $row['issued_at'],
+        'certificateNo' => $row['certificate_no'],
+        'note' => $row['note'] ?? '',
+        'createdBy' => $row['created_by'],
     ];
 }
 

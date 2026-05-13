@@ -25,6 +25,9 @@ const seed = {
   expenses: [],
   attendance: [],
   feedback: [],
+  homework: [],
+  photoReports: [],
+  certificates: [],
   schedule: [],
   trialLessons: [],
   lessonChecks: [],
@@ -87,6 +90,9 @@ function normalizeState(nextState) {
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
   nextState.feedback = nextState.feedback || [];
+  nextState.homework = nextState.homework || [];
+  nextState.photoReports = nextState.photoReports || [];
+  nextState.certificates = nextState.certificates || [];
   nextState.schedule = nextState.schedule || [];
   nextState.trialLessons = nextState.trialLessons || [];
   nextState.lessonChecks = nextState.lessonChecks || [];
@@ -211,6 +217,21 @@ function visibleAttendance() {
 function visibleFeedback() {
   const ids = visibleStudentIds();
   return state.feedback.filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visibleHomework() {
+  const ids = visibleStudentIds();
+  return (state.homework || []).filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visiblePhotoReports() {
+  const ids = visibleStudentIds();
+  return (state.photoReports || []).filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visibleCertificates() {
+  const ids = visibleStudentIds();
+  return (state.certificates || []).filter((item) => ids.has(Number(item.studentId)));
 }
 
 function visibleSchedule() {
@@ -1127,6 +1148,7 @@ function renderAttendance() {
       <div class="filters">
         ${!isParent() ? `<button class="button primary" data-add-attendance type="button">+ Отметка</button>` : ""}
         ${!isParent() ? `<button class="button secondary" data-unified-qr type="button">Единый QR</button>` : `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>`}
+        <button class="button secondary" data-print-attendance type="button">Печать ведомости</button>
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
         <label class="inline-filter">Группа
           <select id="attendanceGroupFilter">
@@ -1417,9 +1439,15 @@ function expenseCategoryLabel(category) {
 function renderFeedback() {
   const notes = visibleFeedback();
   const reviews = isAdmin() ? state.parentReviews || [] : visibleParentReviews();
+  const homework = visibleHomework();
+  const reports = visiblePhotoReports();
+  const certificates = visibleCertificates();
   return `
     <div class="toolbar">
       ${isParent() ? `<button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>` : `<button class="button primary" data-add-feedback type="button">+ Фидбек</button>`}
+      ${!isParent() ? `<button class="button secondary" data-add-homework type="button">+ Домашка</button>` : ""}
+      ${!isParent() ? `<button class="button secondary" data-add-photo-report type="button">+ Фотоотчет</button>` : ""}
+      ${isAdmin() ? `<button class="button ghost" data-add-certificate type="button">Сертификат</button>` : ""}
       <span class="badge neutral">${notes.length} заметок</span>
       ${reviews.length ? `<span class="badge active">${reviews.length} отзывов родителей</span>` : ""}
     </div>
@@ -1454,6 +1482,26 @@ function renderFeedback() {
         })
         .join("")}
     </div>
+    <div class="module-grid learning-addons">
+      <article class="card">
+        <div class="card-header"><h3>Домашние задания</h3><span class="badge neutral">${homework.length}</span></div>
+        <div class="card-body list">
+          ${homework.map((item) => homeworkRow(item)).join("") || `<div class="empty">Домашних заданий пока нет</div>`}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Фотоотчеты уроков</h3><span class="badge active">${reports.length}</span></div>
+        <div class="card-body photo-report-grid">
+          ${reports.map((item) => photoReportCard(item)).join("") || `<div class="empty">Фотоотчеты появятся после уроков</div>`}
+        </div>
+      </article>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Сертификаты</h3><span class="badge soon">${certificates.length}</span></div>
+      <div class="card-body certificate-list">
+        ${certificates.map((item) => certificateRow(item)).join("") || `<div class="empty">Сертификаты можно создать после завершения программы A/B.</div>`}
+      </div>
+    </article>
   `;
 }
 
@@ -1520,6 +1568,9 @@ function parentStudentCard(student) {
   const program = programProgress(student);
   const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 5);
   const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 3);
+  const homework = visibleHomework().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 3);
+  const reports = visiblePhotoReports().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 2);
+  const certificates = visibleCertificates().filter((item) => Number(item.studentId) === Number(student.id));
   return `
     <article class="card parent-child-card">
       <div class="card-header">
@@ -1571,6 +1622,11 @@ function parentStudentCard(student) {
         ${attendance.map((item) => `<div class="list-row"><span>${formatDate(item.date)}</span><small>${statusText[item.status]} · ${item.topic}</small></div>`).join("") || `<div class="empty">Пока нет отметок</div>`}
         <strong>Фидбек ментора</strong>
         ${feedback.map((note) => `<div class="feedback-note"><strong>${note.skill}</strong><small>${note.mentor} · ${formatDate(note.date)}</small><p>${note.text}</p></div>`).join("") || `<div class="empty">Ментор еще не добавил фидбек</div>`}
+        <strong>Домашние задания</strong>
+        ${homework.map((item) => homeworkRow(item)).join("") || `<div class="empty">Пока нет домашки</div>`}
+        <strong>Фотоотчеты</strong>
+        ${reports.map((item) => photoReportCard(item)).join("") || `<div class="empty">Фотоотчеты появятся после уроков</div>`}
+        ${certificates.length ? `<strong>Сертификаты</strong>${certificates.map((item) => certificateRow(item)).join("")}` : ""}
       </div>
     </article>`;
 }
@@ -1689,6 +1745,56 @@ function parentReviewCard(review) {
       <small>${review.mentor} · ${formatDate(review.date)} · +${review.bonusPoints || 0} XP</small>
       <p>${review.text}</p>
     </article>`;
+}
+
+function homeworkRow(item) {
+  const student = byId(item.studentId);
+  const done = item.status === "done";
+  return `
+    <div class="list-row homework-row ${done ? "done" : ""}">
+      <div>
+        <strong>${item.title}</strong>
+        <small>${student?.name || "Ученик"} · ${item.dueDate ? `до ${formatDate(item.dueDate)}` : "без срока"} · ${item.createdBy || "S7"}</small>
+        <small>${item.text}</small>
+      </div>
+      <div class="row-actions">
+        <span class="badge ${done ? "active" : "soon"}">${done ? "выполнено" : "задано"}</span>
+        ${isParent() && !done ? `<button class="button secondary compact" data-homework-done="${item.id}" type="button">Готово</button>` : ""}
+        ${!isParent() ? `<button class="button ghost compact" data-homework-toggle="${item.id}:${done ? "assigned" : "done"}" type="button">${done ? "Вернуть" : "Готово"}</button>` : ""}
+        ${!isParent() ? `<button class="button danger compact" data-delete-homework="${item.id}" type="button">Удалить</button>` : ""}
+      </div>
+    </div>`;
+}
+
+function photoReportCard(item) {
+  const student = byId(item.studentId);
+  return `
+    <article class="photo-report-card">
+      ${item.photoUrl ? `<img src="${item.photoUrl}" alt="${item.title}" loading="lazy" />` : `<div class="photo-placeholder">S7</div>`}
+      <div>
+        <strong>${item.title}</strong>
+        <small>${student?.name || "Ученик"} · ${item.mentor} · ${formatDate(item.date)}</small>
+        <p>${item.text}</p>
+        ${!isParent() ? `<button class="button danger compact" data-delete-photo-report="${item.id}" type="button">Удалить</button>` : ""}
+      </div>
+    </article>`;
+}
+
+function certificateRow(item) {
+  const student = byId(item.studentId);
+  return `
+    <div class="certificate-row">
+      <div>
+        <span class="certificate-seal">S7</span>
+        <strong>${student?.name || "Ученик"}</strong>
+        <small>${item.title} · Программа ${item.program} · ${formatDate(item.issuedAt)}</small>
+        <small>№ ${item.certificateNo}${item.note ? ` · ${item.note}` : ""}</small>
+      </div>
+      <div class="row-actions">
+        <button class="button secondary compact" data-view-certificate="${item.id}" type="button">Открыть</button>
+        ${isAdmin() ? `<button class="button danger compact" data-delete-certificate="${item.id}" type="button">Удалить</button>` : ""}
+      </div>
+    </div>`;
 }
 
 function visibleMethods() {
@@ -2093,6 +2199,25 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-announcement]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("announcement", Number(button.dataset.deleteAnnouncement)));
   });
+  document.querySelectorAll("[data-homework-done]").forEach((button) => {
+    button.addEventListener("click", () => updateHomeworkStatus(Number(button.dataset.homeworkDone), "done"));
+  });
+  document.querySelectorAll("[data-homework-toggle]").forEach((button) => {
+    const [id, status] = button.dataset.homeworkToggle.split(":");
+    button.addEventListener("click", () => updateHomeworkStatus(Number(id), status));
+  });
+  document.querySelectorAll("[data-delete-homework]").forEach((button) => {
+    button.addEventListener("click", () => deleteHomework(Number(button.dataset.deleteHomework)));
+  });
+  document.querySelectorAll("[data-delete-photo-report]").forEach((button) => {
+    button.addEventListener("click", () => deletePhotoReport(Number(button.dataset.deletePhotoReport)));
+  });
+  document.querySelectorAll("[data-view-certificate]").forEach((button) => {
+    button.addEventListener("click", () => openCertificatePreview(Number(button.dataset.viewCertificate)));
+  });
+  document.querySelectorAll("[data-delete-certificate]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("certificate", Number(button.dataset.deleteCertificate)));
+  });
   document.querySelectorAll("[data-add-lesson-check]").forEach((button) => {
     button.addEventListener("click", () => openLessonCheckModal(button.dataset.addLessonCheck || ""));
   });
@@ -2106,8 +2231,12 @@ function bindViewActions() {
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-expense]")?.addEventListener("click", openExpenseModal);
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
+  document.querySelector("[data-add-homework]")?.addEventListener("click", () => openHomeworkModal());
+  document.querySelector("[data-add-photo-report]")?.addEventListener("click", () => openPhotoReportModal());
+  document.querySelector("[data-add-certificate]")?.addEventListener("click", () => openCertificateModal());
   document.querySelector("[data-add-parent-review]")?.addEventListener("click", () => openParentReviewModal());
   document.querySelector("[data-add-announcement]")?.addEventListener("click", () => openAnnouncementModal());
+  document.querySelector("[data-print-attendance]")?.addEventListener("click", printAttendanceSheet);
   document.querySelector("[data-export-attendance]")?.addEventListener("click", exportAttendanceCsv);
   document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
   document.querySelector("#attendanceGroupFilter")?.addEventListener("change", (event) => {
@@ -2784,6 +2913,7 @@ async function deleteRecord(type, id) {
     announcement: ["delete_announcement", "announcements"],
     expense: ["delete_expense", "expenses"],
     trial: ["delete_trial", "trialLessons"],
+    certificate: ["delete_certificate", "certificates"],
   };
   const [action, key] = map[type];
   if (backendEnabled) {
@@ -2867,6 +2997,9 @@ async function deleteStudent(studentId) {
   state.payments = state.payments.filter((item) => Number(item.studentId) !== Number(studentId));
   state.attendance = state.attendance.filter((item) => Number(item.studentId) !== Number(studentId));
   state.feedback = state.feedback.filter((item) => Number(item.studentId) !== Number(studentId));
+  state.homework = (state.homework || []).filter((item) => Number(item.studentId) !== Number(studentId));
+  state.photoReports = (state.photoReports || []).filter((item) => Number(item.studentId) !== Number(studentId));
+  state.certificates = (state.certificates || []).filter((item) => Number(item.studentId) !== Number(studentId));
   saveState();
   render();
 }
@@ -3277,6 +3410,228 @@ function openParentReviewModal(selectedStudentId = null) {
     closeModal();
     render();
   });
+}
+
+function openHomeworkModal() {
+  if (isParent()) return;
+  const students = visibleStudents();
+  openModal(
+    "Домашнее задание",
+    `<form class="modal-form" id="homeworkForm">
+      <label style="grid-column:1/-1">Ученики
+        <select name="studentIds" multiple size="6" required>
+          ${students.map((student) => `<option value="${student.id}">${student.name} · ${student.group}</option>`).join("")}
+        </select>
+      </label>
+      <label>Название<input name="title" required placeholder="Например, собрать модель манипулятора" /></label>
+      <label>Срок<input name="dueDate" type="date" /></label>
+      <label style="grid-column:1/-1">Задание<textarea name="text" required placeholder="Что сделать дома, что принести, ссылку на материал"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Выдать</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#homeworkForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const form = Object.fromEntries(formData.entries());
+    const studentIds = formData.getAll("studentIds").map(Number);
+    const payload = { ...form, studentIds };
+    if (backendEnabled) {
+      await apiRequest("create_homework", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    studentIds.forEach((studentId, index) => {
+      state.homework.unshift({
+        id: Date.now() + index,
+        studentId,
+        title: form.title,
+        text: form.text,
+        dueDate: form.dueDate,
+        status: "assigned",
+        createdBy: currentUser.name,
+      });
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+async function updateHomeworkStatus(homeworkId, status = "done") {
+  const item = (state.homework || []).find((homework) => Number(homework.id) === Number(homeworkId));
+  if (!item) return;
+  if (backendEnabled) {
+    await apiRequest("update_homework_status", { id: homeworkId, status });
+    await refreshData();
+    return;
+  }
+  item.status = status;
+  saveState();
+  render();
+}
+
+async function deleteHomework(homeworkId) {
+  if (isParent() || !confirm("Удалить домашнее задание?")) return;
+  if (backendEnabled) {
+    await apiRequest("delete_homework", { id: homeworkId });
+    await refreshData();
+    return;
+  }
+  state.homework = (state.homework || []).filter((item) => Number(item.id) !== Number(homeworkId));
+  saveState();
+  render();
+}
+
+function openPhotoReportModal() {
+  if (isParent()) return;
+  openModal(
+    "Фотоотчет урока",
+    `<form class="modal-form" id="photoReportForm">
+      ${studentSelectField(visibleStudents())}
+      <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Заголовок<input name="title" required placeholder="Например, Робот на ультразвуковом датчике" /></label>
+      <label>Ссылка на фото<input name="photoUrl" type="url" placeholder="https://..." /></label>
+      <label style="grid-column:1/-1">Описание<textarea name="text" required placeholder="Что делали на уроке, что получилось, следующий шаг"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Опубликовать</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#photoReportForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const report = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const payload = {
+      ...report,
+      studentId: Number(report.studentId),
+      mentor: currentUser.name,
+    };
+    if (backendEnabled) {
+      await apiRequest("create_photo_report", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.photoReports.unshift({ ...payload, id: Date.now() });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+async function deletePhotoReport(reportId) {
+  if (isParent() || !confirm("Удалить фотоотчет?")) return;
+  if (backendEnabled) {
+    await apiRequest("delete_photo_report", { id: reportId });
+    await refreshData();
+    return;
+  }
+  state.photoReports = (state.photoReports || []).filter((item) => Number(item.id) !== Number(reportId));
+  saveState();
+  render();
+}
+
+function openCertificateModal() {
+  if (!isAdmin()) return;
+  const students = visibleStudents();
+  const today = new Date().toISOString().slice(0, 10);
+  openModal(
+    "Конструктор сертификата",
+    `<form class="modal-form" id="certificateForm">
+      ${studentSelectField(students)}
+      <label>Программа<select name="program"><option value="A">Программа A</option><option value="B">Программа B</option></select></label>
+      <label>Дата выдачи<input name="issuedAt" type="date" required value="${today}" /></label>
+      <label>Номер<input name="certificateNo" required value="S7-${today.replaceAll("-", "").slice(2)}-${String(Date.now()).slice(-4)}" /></label>
+      <label style="grid-column:1/-1">Заголовок<input name="title" required value="Сертификат об окончании программы" /></label>
+      <label style="grid-column:1/-1">Комментарий<textarea name="note" placeholder="Например, успешно завершил 34 урока и защитил проект"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Создать</button></div>
+    </form>`,
+  );
+  const form = modalRoot.querySelector("#certificateForm");
+  const syncProgram = () => {
+    const student = byId(form.studentId.value);
+    if (student) form.program.value = programTrack(student);
+  };
+  form.studentId.addEventListener("change", syncProgram);
+  syncProgram();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const certificate = Object.fromEntries(new FormData(event.currentTarget).entries());
+    certificate.studentId = Number(certificate.studentId);
+    if (backendEnabled) {
+      await apiRequest("create_certificate", certificate);
+      closeModal();
+      await refreshData();
+      const created = visibleCertificates().find((item) => item.certificateNo === certificate.certificateNo);
+      if (created) openCertificatePreview(created.id);
+      return;
+    }
+    state.certificates.unshift({ ...certificate, id: Date.now(), createdBy: currentUser.name });
+    saveState();
+    closeModal();
+    render();
+    openCertificatePreview(state.certificates[0].id);
+  });
+}
+
+function openCertificatePreview(certificateId) {
+  const certificate = visibleCertificates().find((item) => Number(item.id) === Number(certificateId));
+  if (!certificate) return;
+  const student = byId(certificate.studentId);
+  const program = student ? programProgress(student) : null;
+  openModal(
+    "Сертификат",
+    `<div class="certificate-modal">
+      <div class="certificate-paper">
+        <div class="certificate-top">
+          <img src="assets/logo.svg" alt="S7 Robotics" />
+          <span>${certificate.certificateNo}</span>
+        </div>
+        <p class="certificate-kicker">S7 Robotics Education Center</p>
+        <h2>${certificate.title}</h2>
+        <p>Настоящим подтверждается, что</p>
+        <strong class="certificate-name">${student?.name || "Ученик"}</strong>
+        <p>успешно завершил(а) ${programTitle(certificate.program)}${program ? ` · ${program.total} урока` : ""}</p>
+        <small>${certificate.note || "За системную работу, инженерное мышление и защиту учебного проекта."}</small>
+        <div class="certificate-footer">
+          <span>${formatDate(certificate.issuedAt)}</span>
+          <span>Директор S7 Robotics</span>
+        </div>
+      </div>
+      <div class="form-actions certificate-actions">
+        <button class="button ghost" data-close-modal type="button">Закрыть</button>
+        <button class="button primary" data-print-certificate type="button">Печать</button>
+      </div>
+    </div>`,
+  );
+  modalRoot.querySelector("[data-print-certificate]").addEventListener("click", () => window.print());
+}
+
+function printAttendanceSheet() {
+  const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
+  const title = attendanceGroup === "all" ? "Все доступные группы" : attendanceGroup;
+  const rows = students
+    .map((student, index) => {
+      const sub = subscriptionStatus(student);
+      return `<tr><td>${index + 1}</td><td>${student.name}</td><td>${student.group}</td><td>${student.mentor}</td><td>#${sub.currentSubscriptionNumber} · ${sub.visitLabel}</td><td></td></tr>`;
+    })
+    .join("");
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) return;
+  win.document.write(`
+    <html><head><title>Ведомость S7 Robotics</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:28px;color:#10233f}
+      h1{margin:0 0 4px;font-size:26px} p{margin:0 0 18px;color:#5f6f84}
+      table{width:100%;border-collapse:collapse} th,td{border:1px solid #cfdceb;padding:10px;text-align:left}
+      th{background:#eef6ff} .sign{height:42px}
+    </style></head><body>
+      <h1>S7 Robotics · ведомость посещаемости</h1>
+      <p>${title} · ${formatDate(new Date().toISOString().slice(0, 10))}</p>
+      <table><thead><tr><th>№</th><th>Ученик</th><th>Группа</th><th>Ментор</th><th>Абонемент</th><th>Подпись/отметка</th></tr></thead><tbody>${rows}</tbody></table>
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
 function openAnnouncementModal() {
