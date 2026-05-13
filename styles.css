@@ -1589,6 +1589,17 @@ td small {
   font-weight: 800;
 }
 
+.payment-alert-row {
+  align-items: flex-start;
+  border-color: rgba(226, 75, 91, 0.28);
+  background: rgba(226, 75, 91, 0.08);
+}
+
+.payment-alert-row small {
+  color: #8f2530;
+  font-weight: 700;
+}
+
 .progress {
   height: 9px;
   overflow: hidden;
@@ -1683,8 +1694,9 @@ td small {
 }
 
 .mark {
-  width: 30px;
+  min-width: 30px;
   height: 30px;
+  padding: 0 8px;
   display: inline-grid;
   place-items: center;
   border: 0;

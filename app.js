@@ -279,16 +279,36 @@ function studentPresentAttendance(studentId) {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+function studentAttendanceSince(studentId, startDate = null) {
+  return (state.attendance || [])
+    .filter((item) => Number(item.studentId) === Number(studentId))
+    .filter((item) => !startDate || new Date(item.date) >= new Date(startDate))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function attendanceSubscriptionUsage(studentId, startDate = null) {
+  const records = studentAttendanceSince(studentId, startDate);
+  const present = records.filter((item) => item.status === "present").length;
+  const absent = records.filter((item) => item.status === "absent").length;
+  const billableAbsent = Math.max(0, absent - 2);
+  return {
+    present,
+    absent,
+    freeAbsent: Math.min(absent, 2),
+    billableAbsent,
+    used: present + billableAbsent,
+    needsDirectorLetter: absent >= 3,
+  };
+}
+
 function subscriptionStatus(student) {
   const payments = studentPayments(student.id);
   const lastPayment = payments[0];
   const firstPayment = payments.at(-1);
   const startDate = firstPayment?.date || student.nextPayment || null;
-  const visits = startDate
-    ? studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))
-    : studentPresentAttendance(student.id);
-  const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + visits.length);
-  const used = Math.min(visits.length, totalLessons);
+  const usage = attendanceSubscriptionUsage(student.id, startDate);
+  const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + usage.used);
+  const used = Math.min(usage.used, totalLessons);
   const remaining = Math.max(0, totalLessons - used);
   const nextPaymentDate = estimateNextPaymentDate(student, startDate, used, totalLessons);
   const needsPayment = remaining <= 1;
@@ -303,6 +323,10 @@ function subscriptionStatus(student) {
     expired,
     nextPaymentDate,
     lastPayment,
+    absent: usage.absent,
+    freeAbsent: usage.freeAbsent,
+    billableAbsent: usage.billableAbsent,
+    needsDirectorLetter: usage.needsDirectorLetter,
   };
 }
 
@@ -322,7 +346,15 @@ function estimateNextPaymentDate(student, startDate, used, totalLessons = 8) {
   if (!startDate) return student.nextPayment || "";
   const warningVisit = Math.max(1, totalLessons - 1);
   if (used >= warningVisit) {
-    const paymentVisit = studentPresentAttendance(student.id).filter((item) => new Date(item.date) >= new Date(startDate))[warningVisit - 1];
+    const records = studentAttendanceSince(student.id, startDate);
+    let absentCount = 0;
+    const billableRecords = records.filter((item) => {
+      if (item.status === "present") return true;
+      if (item.status !== "absent") return false;
+      absentCount += 1;
+      return absentCount > 2;
+    });
+    const paymentVisit = billableRecords[warningVisit - 1];
     if (paymentVisit) return paymentVisit.date;
   }
   const lessonDays = groupLessonDays(student.group);
@@ -440,6 +472,17 @@ function crmTasks() {
         hint: sub.expired ? "Абонемент закончился" : `Оплата на ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "7 посещении"}`,
         view: isAdmin() ? "payments" : "students",
         tone: sub.expired ? "overdue" : "soon",
+      });
+    });
+  students
+    .filter((student) => subscriptionStatus(student).needsDirectorLetter)
+    .forEach((student) => {
+      const sub = subscriptionStatus(student);
+      tasks.push({
+        title: `${student.name}: ${sub.absent} НБ`,
+        hint: "Родителю нужно направить письмо на имя директора",
+        view: "attendance",
+        tone: "overdue",
       });
     });
   students
@@ -756,8 +799,29 @@ function renderDashboard() {
 }
 
 function renderParentDashboard() {
+  const absenceNotifications = visibleStudents()
+    .map((student) => ({ student, sub: subscriptionStatus(student) }))
+    .filter(({ sub }) => sub.needsDirectorLetter);
   return `
     <div class="parent-overview">
+      ${
+        absenceNotifications.length
+          ? `<article class="card parent-news-card">
+              <div class="card-header">
+                <h3>Уведомления по НБ</h3>
+                <span class="badge overdue">${absenceNotifications.length}</span>
+              </div>
+              <div class="card-body list">
+                ${absenceNotifications
+                  .map(
+                    ({ student, sub }) =>
+                      `<div class="list-row payment-alert-row"><strong>${student.name}: ${sub.absent} НБ</strong><small>Нужно направить письмо на имя директора. Начиная с 3-го НБ занятия списываются с абонемента.</small></div>`,
+                  )
+                  .join("")}
+              </div>
+            </article>`
+          : ""
+      }
       <article class="card branch-map-card">
         <div class="card-header">
           <h3>Карта S7 Robotics в Мангистау</h3>
@@ -972,6 +1036,7 @@ function renderStudents() {
                     <td>
                       <strong>${sub.visitLabel}</strong>
                       <small>${sub.remaining} занятий осталось</small>
+                      ${sub.absent ? `<small>${sub.absent} НБ · списано ${sub.billableAbsent}</small>` : ""}
                       <small>${sub.startDate ? `оплата ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
                       <small>${isAdmin() ? `оплата ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана"}` : "детали у админа"}</small>
                     </td>
@@ -1038,12 +1103,17 @@ function renderAttendance() {
                   const rowRecords = records.filter((item) => Number(item.studentId) === Number(student.id));
                   const presentCount = rowRecords.filter((item) => item.status === "present").length;
                   const sub = subscriptionStatus(student);
+                  const attendanceHint = sub.needsDirectorLetter
+                    ? `НБ ${sub.absent}: письмо директору`
+                    : sub.absent
+                      ? `НБ ${sub.absent}/2 без списания`
+                      : `${presentCount}/${dates.length} в табеле`;
                   return `
                     <tr>
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
                       ${dates.map((date) => attendanceCell(student.id, date, records)).join("")}
-                      <td><strong>${sub.visitLabel}</strong><small>${sub.needsPayment ? "пора на оплату" : `${presentCount}/${dates.length} в табеле`}</small></td>
+                      <td><strong>${sub.visitLabel}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small></td>
                     </tr>`;
                 })
                 .join("") || `<tr><td colspan="${dates.length + 3}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
@@ -1174,7 +1244,7 @@ function attendanceCell(studentId, date, records) {
     if (isParent()) return `<td>${tag("missed", "-")}</td>`;
     return `<td><button class="mark missed" data-toggle-attendance="${studentId}:${date}" title="Поставить был" type="button">-</button></td>`;
   }
-  const mark = record.status === "present" ? "Б" : "Н";
+  const mark = record.status === "present" ? "Б" : "НБ";
   if (isParent()) return `<td>${tag(record.status, mark, record.topic)}<small>${record.topic}</small></td>`;
   return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${date}" title="${record.topic}" type="button">${mark}</button><small>${record.topic}</small></td>`;
 }
@@ -1375,10 +1445,15 @@ function parentStudentCard(student) {
         <span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : "active"}">${sub.visitLabel}</span>
       </div>
       <div class="profile-summary">
-        ${stat("Абонемент", `${sub.remaining}/8`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
+        ${stat("Абонемент", `${sub.remaining}/${sub.totalLessons}`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
         ${stat("Уровень", stats.level, `${stats.xp} XP`)}
         ${stat(program.title, `${program.completed}/${program.total}`, `следующий урок ${program.nextLesson}`)}
       </div>
+      ${
+        sub.needsDirectorLetter
+          ? `<div class="list-row payment-alert-row"><strong>Уведомление по НБ</strong><small>У ученика уже ${sub.absent} НБ. Родителю нужно направить письмо на имя директора; начиная с 3-го НБ занятия списываются с абонемента.</small></div>`
+          : ""
+      }
       <div class="child-level-panel">
         <div>
           <strong>Прогресс уровня</strong>
@@ -1992,6 +2067,11 @@ function openStudentProfile(studentId) {
         ${stat("Прогресс", `${student.progress}%`, "текущий уровень")}
         ${stat("Оплата", sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана", sub.needsPayment ? "пора напомнить" : "по графику")}
       </div>
+      ${
+        sub.needsDirectorLetter
+          ? `<div class="list-row payment-alert-row"><strong>${sub.absent} НБ</strong><small>Первые 2 НБ не списаны. Начиная с 3-го НБ занятия списываются; родителю нужно письмо на имя директора.</small></div>`
+          : ""
+      }
       <div class="module-grid profile-sections">
         <section class="card">
           <div class="card-header"><h3>Контакты</h3><span class="badge ${student.status}">${statusText[student.status]}</span></div>
