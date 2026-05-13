@@ -81,7 +81,7 @@ function loadState() {
 function normalizeState(nextState) {
   nextState.users = nextState.users || [];
   nextState.users = nextState.users.map((user) => ({ phone: "", ...user }));
-  nextState.students = nextState.students || [];
+  nextState.students = (nextState.students || []).map((student) => ({ subscriptionNumber: 1, ...student }));
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
   nextState.feedback = nextState.feedback || [];
@@ -301,15 +301,32 @@ function attendanceSubscriptionUsage(studentId, startDate = null) {
   };
 }
 
+function billableAttendanceRecords(studentId, startDate = null) {
+  let absentCount = 0;
+  return studentAttendanceSince(studentId, startDate).filter((record) => {
+    if (record.status === "present") return true;
+    if (record.status === "absent") {
+      absentCount += 1;
+      return absentCount > 2;
+    }
+    return false;
+  });
+}
+
 function subscriptionStatus(student) {
   const payments = studentPayments(student.id);
   const lastPayment = payments[0];
   const firstPayment = payments.at(-1);
   const startDate = firstPayment?.date || student.nextPayment || null;
   const usage = attendanceSubscriptionUsage(student.id, startDate);
+  const manualSubscription = Math.max(1, Number(student.subscriptionNumber || 1));
   const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + usage.used);
   const used = Math.min(usage.used, totalLessons);
   const remaining = Math.max(0, totalLessons - used);
+  const completedCycles = Math.floor(used / 8);
+  const currentCycleUsed = used % 8;
+  const currentSubscriptionNumber = manualSubscription + completedCycles;
+  const totalProgressVisits = (manualSubscription - 1) * 8 + used;
   const nextPaymentDate = estimateNextPaymentDate(student, startDate, used, totalLessons);
   const needsPayment = remaining <= 1;
   const expired = remaining <= 0;
@@ -317,8 +334,11 @@ function subscriptionStatus(student) {
     startDate,
     totalLessons,
     used,
+    currentCycleUsed,
+    currentSubscriptionNumber,
+    totalProgressVisits,
     remaining,
-    visitLabel: `${used}/${totalLessons}`,
+    visitLabel: `${currentCycleUsed}/8`,
     needsPayment,
     expired,
     nextPaymentDate,
@@ -468,7 +488,7 @@ function crmTasks() {
     .forEach((student) => {
       const sub = subscriptionStatus(student);
       tasks.push({
-        title: `${student.name}: ${sub.visitLabel} посещений`,
+        title: `${student.name}: абонемент #${sub.currentSubscriptionNumber}`,
         hint: sub.expired ? "Абонемент закончился" : `Оплата на ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "7 посещении"}`,
         view: isAdmin() ? "payments" : "students",
         tone: sub.expired ? "overdue" : "soon",
@@ -999,7 +1019,8 @@ function programTitle(track) {
 
 function programProgress(student) {
   const total = 34;
-  const completed = Math.min(total, studentPresentAttendance(student.id).length);
+  const historicalVisits = (Math.max(1, Number(student.subscriptionNumber || 1)) - 1) * 8;
+  const completed = Math.min(total, historicalVisits + studentPresentAttendance(student.id).length);
   const percent = Math.round((completed / total) * 100);
   const track = programTrack(student);
   const nextLesson = Math.min(total, completed + 1);
@@ -1051,8 +1072,8 @@ function renderStudents() {
                     <td>${student.parent}</td>
                     <td>${student.mentor}</td>
                     <td>
-                      <strong>${sub.visitLabel}</strong>
-                      <small>${sub.remaining} занятий осталось</small>
+                      <strong>#${sub.currentSubscriptionNumber} · ${sub.visitLabel}</strong>
+                      <small>${sub.remaining} занятий осталось · всего ${sub.totalProgressVisits}</small>
                       ${sub.absent ? `<small>${sub.absent} НБ · списано ${sub.billableAbsent}</small>` : ""}
                       <small>${sub.startDate ? `оплата ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
                       <small>${isAdmin() ? `оплата ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана"}` : "детали у админа"}</small>
@@ -1080,8 +1101,6 @@ function renderAttendance() {
   const groups = uniqueGroups();
   if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
   const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
-  const selectedIds = new Set(students.map((student) => Number(student.id)));
-  const dates = attendanceDates(selectedIds);
   const records = visibleAttendance();
 
   return `
@@ -1109,7 +1128,8 @@ function renderAttendance() {
             <tr>
               <th>Ученик</th>
               <th>Группа</th>
-              ${dates.map((date) => `<th>${formatDate(date)}</th>`).join("")}
+              <th>Абонемент</th>
+              ${Array.from({ length: 8 }, (_, index) => `<th>${index + 1}</th>`).join("")}
               <th>Итого</th>
             </tr>
           </thead>
@@ -1120,26 +1140,42 @@ function renderAttendance() {
                   const rowRecords = records.filter((item) => Number(item.studentId) === Number(student.id));
                   const presentCount = rowRecords.filter((item) => item.status === "present").length;
                   const sub = subscriptionStatus(student);
+                  const cells = currentSubscriptionCells(student, sub);
                   const attendanceHint = sub.needsDirectorLetter
                     ? `НБ ${sub.absent}: письмо директору`
                     : sub.absent
                       ? `НБ ${sub.absent}/2 без списания`
-                      : `${presentCount}/${dates.length} в табеле`;
+                      : `${presentCount} посещений в истории`;
                   return `
                     <tr>
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
-                      ${dates.map((date) => attendanceCell(student.id, date, records)).join("")}
-                      <td><strong>${sub.visitLabel}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small></td>
+                      <td>${subscriptionBadge(sub)}</td>
+                      ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
+                      <td><strong>${sub.totalProgressVisits}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small></td>
                     </tr>`;
                 })
-                .join("") || `<tr><td colspan="${dates.length + 3}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+                .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
             }
           </tbody>
         </table>
       </div>
     </article>
   `;
+}
+
+function currentSubscriptionCells(student, sub = subscriptionStatus(student)) {
+  const records = billableAttendanceRecords(student.id, sub.startDate);
+  const cycleStart = Math.floor(sub.used / 8) * 8;
+  return Array.from({ length: 8 }, (_, index) => records[cycleStart + index] || null);
+}
+
+function subscriptionBadge(sub) {
+  return `
+    <div class="subscription-badge ${sub.expired ? "expired" : ""}">
+      <strong>#${sub.currentSubscriptionNumber}</strong>
+      <small>${sub.currentCycleUsed}/8</small>
+    </div>`;
 }
 
 function renderSchedule() {
@@ -1255,16 +1291,16 @@ function attendanceDates(studentIds = visibleStudentIds()) {
   return dates.length ? dates : [new Date().toISOString().slice(0, 10)];
 }
 
-function attendanceCell(studentId, date, records) {
-  const record = records.find((item) => Number(item.studentId) === Number(studentId) && item.date === date);
+function attendanceSlotCell(studentId, slotIndex, record) {
   const tag = (className, text, title = "") => `<span class="mark ${className}" title="${title}">${text}</span>`;
   if (!record) {
     if (isParent()) return `<td>${tag("missed", "-")}</td>`;
-    return `<td><button class="mark missed" data-toggle-attendance="${studentId}:${date}" title="Поставить был" type="button">-</button></td>`;
+    return `<td><button class="mark missed" data-add-attendance-student="${studentId}" title="Добавить дату занятия ${slotIndex + 1}" type="button">${slotIndex + 1}</button></td>`;
   }
   const mark = record.status === "present" ? "Б" : "НБ";
-  if (isParent()) return `<td>${tag(record.status, mark, record.topic)}<small>${record.topic}</small></td>`;
-  return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${date}" title="${record.topic}" type="button">${mark}</button><small>${record.topic}</small></td>`;
+  const label = `${formatDate(record.date)} · ${record.topic}`;
+  if (isParent()) return `<td>${tag(record.status, mark, label)}<small>${formatDate(record.date)}</small></td>`;
+  return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${record.date}" title="${label}" type="button">${mark}</button><small>${formatDate(record.date)}</small></td>`;
 }
 
 function renderPayments() {
@@ -1460,10 +1496,10 @@ function parentStudentCard(student) {
     <article class="card parent-child-card">
       <div class="card-header">
         <h3>${student.name}</h3>
-        <span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : "active"}">${sub.visitLabel}</span>
+        <span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : "active"}">#${sub.currentSubscriptionNumber}</span>
       </div>
       <div class="profile-summary">
-        ${stat("Абонемент", `${sub.remaining}/${sub.totalLessons}`, sub.needsPayment ? "пора оплатить" : "занятий осталось")}
+        ${stat("Абонемент", sub.visitLabel, `${sub.remaining} осталось · всего ${sub.totalProgressVisits}`)}
         ${stat("Уровень", stats.level, `${stats.xp} XP`)}
         ${stat(program.title, `${program.completed}/${program.total}`, `следующий урок ${program.nextLesson}`)}
       </div>
@@ -1984,6 +2020,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
   });
+  document.querySelectorAll("[data-add-attendance-student]").forEach((button) => {
+    button.addEventListener("click", () => openAttendanceModal(Number(button.dataset.addAttendanceStudent)));
+  });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
@@ -2084,7 +2123,7 @@ function openStudentProfile(studentId) {
     `<div class="profile-modal">
       <div class="profile-summary">
         ${stat("Группа", student.group, student.course)}
-        ${stat("Абонемент", sub.visitLabel, `${sub.remaining} занятий осталось`)}
+        ${stat("Абонемент", `#${sub.currentSubscriptionNumber}`, `${sub.visitLabel} · всего ${sub.totalProgressVisits}`)}
         ${stat("Прогресс", `${student.progress}%`, "текущий уровень")}
         ${stat("Оплата", sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана", sub.needsPayment ? "пора напомнить" : "по графику")}
       </div>
@@ -2731,6 +2770,7 @@ function openStudentModal(studentId = null) {
     modalRoot.querySelector("[name='phone']").value = editingStudent.phone || "";
     modalRoot.querySelector("[name='mentor']").value = editingStudent.mentor || "";
     modalRoot.querySelector("[name='status']").value = editingStudent.status || "active";
+    modalRoot.querySelector("[name='subscriptionNumber']").value = editingStudent.subscriptionNumber || 1;
   }
   modalRoot.querySelector("#studentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2740,6 +2780,7 @@ function openStudentModal(studentId = null) {
       ...student,
       id: editingStudent?.id,
       lessonsLeft: editingStudent?.lessonsLeft ?? 8,
+      subscriptionNumber: Number(student.subscriptionNumber || editingStudent?.subscriptionNumber || 1),
       progress: editingStudent?.progress ?? 10,
       nextPayment: student.paymentDate,
     };
@@ -2776,11 +2817,11 @@ function openStudentModal(studentId = null) {
   });
 }
 
-function openAttendanceModal() {
+function openAttendanceModal(selectedStudentId = null) {
   openModal(
     "Новая отметка",
     `<form class="modal-form" id="attendanceForm">
-      ${studentSelectField()}
+      ${studentSelectField(visibleStudents(), selectedStudentId)}
       <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
       <label>Статус<select name="status"><option value="present">Был</option><option value="absent">Не был</option></select></label>
       <label>Тема урока<input name="topic" required placeholder="Например, моторы и датчики" /></label>

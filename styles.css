@@ -1678,7 +1678,7 @@ td small {
 }
 
 .attendance-table {
-  min-width: 980px;
+  min-width: 1040px;
 }
 
 .attendance-table th,
@@ -1729,6 +1729,32 @@ td small {
 .mark:hover {
   outline: 2px solid #9bc9ff;
   outline-offset: 2px;
+}
+
+.subscription-badge {
+  min-width: 76px;
+  display: inline-grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(18, 168, 122, 0.12);
+  color: #08785a;
+  font-weight: 900;
+}
+
+.subscription-badge strong,
+.subscription-badge small {
+  display: block;
+}
+
+.subscription-badge small {
+  color: inherit;
+  font-weight: 800;
+}
+
+.subscription-badge.expired {
+  background: rgba(226, 75, 91, 0.12);
+  color: #b02c3b;
 }
 
 .day-cell {

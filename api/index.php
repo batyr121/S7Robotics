@@ -96,6 +96,7 @@ function init_db(PDO $pdo): void
             mentor text not null,
             status text not null default 'active',
             lessons_left integer not null default 0,
+            subscription_number integer not null default 1,
             progress integer not null default 0,
             next_payment text,
             created_at text not null default current_timestamp
@@ -237,6 +238,7 @@ function init_db(PDO $pdo): void
     ");
     migrate_users_role_check($pdo);
     migrate_users_phone($pdo);
+    migrate_students_subscription_number($pdo);
 }
 
 function migrate_users_role_check(PDO $pdo): void
@@ -278,6 +280,17 @@ function migrate_users_phone(PDO $pdo): void
         }
     }
     $pdo->exec("alter table users add column phone text not null default ''");
+}
+
+function migrate_students_subscription_number(PDO $pdo): void
+{
+    $columns = $pdo->query('pragma table_info(students)')->fetchAll();
+    foreach ($columns as $column) {
+        if (($column['name'] ?? '') === 'subscription_number') {
+            return;
+        }
+    }
+    $pdo->exec('alter table students add column subscription_number integer not null default 1');
 }
 
 function login(PDO $pdo, array $input): void
@@ -370,8 +383,8 @@ function create_student(PDO $pdo, array $admin, array $input): void
 {
     $paymentDate = $input['paymentDate'] ?? $input['nextPayment'] ?? date('Y-m-d');
     $stmt = $pdo->prepare('
-        insert into students (name, course, group_name, parent, phone, mentor, status, lessons_left, progress, next_payment)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        insert into students (name, course, group_name, parent, phone, mentor, status, lessons_left, subscription_number, progress, next_payment)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ');
     $stmt->execute([
         required($input, 'name'),
@@ -382,6 +395,7 @@ function create_student(PDO $pdo, array $admin, array $input): void
         required($input, 'mentor'),
         $input['status'] ?? 'active',
         8,
+        max(1, (int)($input['subscriptionNumber'] ?? 1)),
         (int)($input['progress'] ?? 10),
         $paymentDate,
     ]);
@@ -397,7 +411,7 @@ function update_student(PDO $pdo, array $admin, array $input): void
     $paymentDate = $input['paymentDate'] ?? $input['nextPayment'] ?? date('Y-m-d');
     $stmt = $pdo->prepare('
         update students
-        set name = ?, course = ?, group_name = ?, parent = ?, phone = ?, mentor = ?, status = ?, progress = ?, next_payment = ?
+        set name = ?, course = ?, group_name = ?, parent = ?, phone = ?, mentor = ?, status = ?, subscription_number = ?, progress = ?, next_payment = ?
         where id = ?
     ');
     $stmt->execute([
@@ -408,6 +422,7 @@ function update_student(PDO $pdo, array $admin, array $input): void
         required($input, 'phone'),
         required($input, 'mentor'),
         $input['status'] ?? 'active',
+        max(1, (int)($input['subscriptionNumber'] ?? 1)),
         (int)($input['progress'] ?? 10),
         $paymentDate,
         $studentId,
@@ -1319,6 +1334,7 @@ function student_row(array $row): array
         'mentor' => $row['mentor'],
         'status' => $row['status'],
         'lessonsLeft' => (int)$row['lessons_left'],
+        'subscriptionNumber' => (int)($row['subscription_number'] ?? 1),
         'progress' => (int)$row['progress'],
         'nextPayment' => $row['next_payment'],
     ];
