@@ -856,7 +856,7 @@ function find_trial_slot(PDO $pdo, string $program, string $preferredDate): ?arr
 
 function group_program(string $group): string
 {
-    return preg_match('/(^|\s|-)b(\s|$|-)|программа\s*b|program\s*b|senior|advanced/ui', $group) ? 'B' : 'A';
+    return preg_match('/(^|[\s-])b\s*\d*($|[\s-])|программа\s*b|program\s*b|senior|advanced/ui', $group) ? 'B' : 'A';
 }
 
 function group_capacity(string $group): int

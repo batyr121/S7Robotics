@@ -409,7 +409,7 @@ function uniqueGroups() {
 }
 
 function groupProgram(group) {
-  return /(^|\s|-)b(\s|$|-)|программа\s*b|program\s*b|senior|advanced/i.test(group || "") ? "B" : "A";
+  return /(^|[\s-])b\s*\d*($|[\s-])|программа\s*b|program\s*b|senior|advanced/i.test(group || "") ? "B" : "A";
 }
 
 function groupCapacity(group) {
@@ -970,7 +970,7 @@ function studentProgressRow(student) {
 
 function programTrack(student) {
   const raw = `${student.course || ""} ${student.group || ""}`.toLowerCase();
-  if (/программа\s*b|program\s*b|(^|\s)b(\s|$)|advanced|senior/.test(raw)) {
+  if (/программа\s*b|program\s*b|(^|[\s-])b\s*\d*($|[\s-])|advanced|senior/.test(raw)) {
     return "B";
   }
   return "A";
