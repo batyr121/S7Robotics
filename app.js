@@ -1152,7 +1152,15 @@ function renderAttendance() {
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
-                      <td><strong>${sub.totalProgressVisits}</strong><small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small><button class="button ghost compact" data-attendance-history="${student.id}" type="button">История</button></td>
+                      <td>
+                        <strong>${sub.totalProgressVisits}</strong>
+                        <small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small>
+                        <div class="row-actions">
+                          ${!isParent() ? `<button class="button secondary compact" data-attendance-qr="${student.id}" type="button">QR</button>` : ""}
+                          <button class="button ghost compact" data-parent-messages="${student.id}" type="button">Сообщения</button>
+                          <button class="button ghost compact" data-attendance-history="${student.id}" type="button">История</button>
+                        </div>
+                      </td>
                     </tr>`;
                 })
                 .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
@@ -2026,6 +2034,12 @@ function bindViewActions() {
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
+  document.querySelectorAll("[data-attendance-qr]").forEach((button) => {
+    button.addEventListener("click", () => openQrAttendanceModal(Number(button.dataset.attendanceQr)));
+  });
+  document.querySelectorAll("[data-parent-messages]").forEach((button) => {
+    button.addEventListener("click", () => openParentMessagesModal(Number(button.dataset.parentMessages)));
+  });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
@@ -2200,6 +2214,110 @@ function openModal(title, content) {
 function closeModal() {
   modalRoot.hidden = true;
   modalRoot.innerHTML = "";
+}
+
+async function openQrAttendanceModal(studentId) {
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const today = new Date().toISOString().slice(0, 10);
+  openModal(
+    `QR посещение · ${student.name}`,
+    `<div class="profile-modal">
+      <form class="modal-form qr-form" id="qrAttendanceForm">
+        <label>Дата урока<input name="date" type="date" required value="${today}" /></label>
+        <button class="button primary" type="submit">Обновить QR</button>
+      </form>
+      <div class="qr-card" id="qrAttendanceCard">
+        <div class="empty">Готовлю QR...</div>
+      </div>
+    </div>`,
+  );
+  const renderQr = async () => {
+    const date = modalRoot.querySelector("#qrAttendanceForm [name='date']").value;
+    const card = modalRoot.querySelector("#qrAttendanceCard");
+    if (!backendEnabled) {
+      card.innerHTML = `<div class="empty">QR работает только на серверной версии сайта.</div>`;
+      return;
+    }
+    try {
+      const data = await apiRequest("qr_attendance_link", { studentId, date });
+      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(data.url)}`;
+      card.innerHTML = `
+        <img src="${qrSrc}" alt="QR отметка посещения" />
+        <strong>${formatDate(date)} · ${student.name}</strong>
+        <small>После сканирования посещение автоматически станет «Был».</small>
+        <button class="button ghost" data-copy-text="${data.url}" type="button">Скопировать ссылку</button>`;
+      bindCopyButtons(card);
+    } catch (error) {
+      card.innerHTML = `<div class="empty">${error.message}</div>`;
+    }
+  };
+  modalRoot.querySelector("#qrAttendanceForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    renderQr();
+  });
+  await renderQr();
+}
+
+function openParentMessagesModal(studentId) {
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const sub = subscriptionStatus(student);
+  const latestFeedback = visibleFeedback().filter((note) => Number(note.studentId) === Number(student.id)).at(0);
+  const templates = [
+    {
+      title: "Остаток абонемента",
+      text: `Здравствуйте! У ${student.name} сейчас абонемент #${sub.currentSubscriptionNumber}, использовано ${sub.visitLabel}, осталось ${sub.remaining} занятий.`,
+    },
+    {
+      title: "3 НБ и письмо директору",
+      text: `Здравствуйте! У ${student.name} уже ${sub.absent} НБ. По правилам центра нужно направить письмо на имя директора. Начиная с 3-го НБ занятия списываются с абонемента.`,
+    },
+    {
+      title: "Посещение урока",
+      text: `Здравствуйте! ${student.name} сегодня был(а) на занятии S7 Robotics. Спасибо за пунктуальность!`,
+    },
+    {
+      title: "Фидбек ментора",
+      text: latestFeedback
+        ? `Здравствуйте! По ${student.name} есть новый фидбек от ментора: ${latestFeedback.skill}. ${latestFeedback.text}`
+        : `Здравствуйте! После следующего занятия ментор добавит фидбек по прогрессу ${student.name}.`,
+    },
+  ];
+  const phone = String(student.phone || "").replace(/\D/g, "");
+  openModal(
+    `Сообщения · ${student.name}`,
+    `<div class="message-templates">
+      ${templates
+        .map(
+          (item) => `
+            <article class="message-template">
+              <strong>${item.title}</strong>
+              <p>${item.text}</p>
+              <div class="row-actions">
+                <button class="button ghost compact" data-copy-text="${item.text.replaceAll('"', "&quot;")}" type="button">Копировать</button>
+                ${phone ? `<a class="button secondary compact" href="https://wa.me/${phone}?text=${encodeURIComponent(item.text)}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+              </div>
+            </article>`,
+        )
+        .join("")}
+    </div>`,
+  );
+  bindCopyButtons(modalRoot);
+}
+
+function bindCopyButtons(root) {
+  root.querySelectorAll("[data-copy-text]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const text = button.dataset.copyText || "";
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Скопировано";
+      } catch {
+        button.textContent = "Выделите текст";
+      }
+    });
+  });
 }
 
 function openAttendanceHistoryModal(studentId) {

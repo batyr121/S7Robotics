@@ -29,6 +29,7 @@ try {
         'login' => login($pdo, $input),
         'register_first_admin' => register_first_admin($pdo, $input),
         'register_parent' => register_parent($pdo, $input),
+        'qr_attendance' => qr_attendance($pdo),
         'data' => data_response($pdo, require_user($pdo)),
         'logout' => logout($pdo, require_user($pdo)),
         'update_profile' => update_profile($pdo, require_user($pdo), $input),
@@ -40,6 +41,7 @@ try {
         'create_expense' => create_expense($pdo, require_admin($pdo), $input),
         'delete_expense' => delete_simple($pdo, require_admin($pdo), $input, 'expenses'),
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
+        'qr_attendance_link' => qr_attendance_link($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
         'create_parent_review' => create_parent_review($pdo, require_user($pdo), $input),
@@ -534,6 +536,57 @@ function create_attendance(PDO $pdo, array $user, array $input): void
     ]);
     recalc_student_subscription($pdo, $studentId);
     data_response($pdo, $user);
+}
+
+function qr_attendance_link(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Родитель не может создавать QR отметки.', 403);
+    }
+    $studentId = (int)required($input, 'studentId');
+    $date = required($input, 'date');
+    assert_student_access($pdo, $user, $studentId);
+    $token = qr_attendance_token($studentId, $date);
+    $url = app_base_url() . '/api/index.php?action=qr_attendance&studentId=' . $studentId . '&date=' . rawurlencode($date) . '&token=' . $token;
+    respond(['url' => $url]);
+}
+
+function qr_attendance(PDO $pdo): void
+{
+    $studentId = (int)($_GET['studentId'] ?? 0);
+    $date = (string)($_GET['date'] ?? '');
+    $token = (string)($_GET['token'] ?? '');
+    if (!$studentId || !$date || !hash_equals(qr_attendance_token($studentId, $date), $token)) {
+        fail('QR ссылка недействительна.', 403);
+    }
+    $stmt = $pdo->prepare('
+        insert into attendance (student_id, date, status, topic, created_by)
+        values (?, ?, ?, ?, null)
+        on conflict(student_id, date) do update set status = excluded.status, topic = excluded.topic
+    ');
+    $stmt->execute([$studentId, $date, 'present', 'QR отметка']);
+    recalc_student_subscription($pdo, $studentId);
+    respond(['ok' => true, 'message' => 'Посещение отмечено.']);
+}
+
+function qr_attendance_token(int $studentId, string $date): string
+{
+    return hash_hmac('sha256', $studentId . '|' . $date, qr_secret());
+}
+
+function qr_secret(): string
+{
+    $path = __DIR__ . '/.storage/qr-secret.txt';
+    if (!is_file($path)) {
+        file_put_contents($path, bin2hex(random_bytes(32)));
+    }
+    return trim((string)file_get_contents($path));
+}
+
+function app_base_url(): string
+{
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    return $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
 }
 
 function toggle_attendance(PDO $pdo, array $user, array $input): void

@@ -1761,6 +1761,45 @@ td small {
   white-space: nowrap;
 }
 
+.qr-card,
+.message-templates {
+  display: grid;
+  gap: 12px;
+}
+
+.qr-card {
+  justify-items: center;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+  text-align: center;
+}
+
+.qr-card img {
+  width: 220px;
+  max-width: 100%;
+  border-radius: 12px;
+  background: white;
+  padding: 10px;
+  box-shadow: var(--shadow-soft);
+}
+
+.message-template {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.message-template p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .day-cell {
   min-height: 112px;
   padding: 10px;
