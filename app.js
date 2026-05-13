@@ -66,6 +66,8 @@ let backendEnabled = false;
 let activeView = "dashboard";
 let searchTerm = "";
 let attendanceGroup = "all";
+let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
+let parentQrScanHandled = false;
 
 function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -636,10 +638,27 @@ function renderShell() {
       ? `Родитель · ${visibleStudents().length} детей`
       : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
   if (heroBand) heroBand.hidden = isParent();
+  if (pendingParentQrScan && isParent() && !parentQrScanHandled) activeView = "parent";
   if (!canUse(activeView)) activeView = "dashboard";
   updatePageTitle();
   syncNavigation();
   render();
+  handlePendingParentQrScan();
+}
+
+function handlePendingParentQrScan() {
+  if (!pendingParentQrScan || parentQrScanHandled || !currentUser) return;
+  parentQrScanHandled = true;
+  if (isParent()) {
+    setTimeout(() => openParentQrScanModal(), 0);
+    return;
+  }
+  setTimeout(() => {
+    openModal(
+      "QR отметка",
+      `<div class="empty">Эта QR отметка работает через аккаунт родителя. Выйдите и войдите как родитель, чтобы подтвердить посещение ребенка.</div>`,
+    );
+  }, 0);
 }
 
 function updateAuthMode() {
@@ -1107,6 +1126,7 @@ function renderAttendance() {
     <div class="toolbar">
       <div class="filters">
         ${!isParent() ? `<button class="button primary" data-add-attendance type="button">+ Отметка</button>` : ""}
+        ${!isParent() ? `<button class="button secondary" data-unified-qr type="button">Единый QR</button>` : `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>`}
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
         <label class="inline-filter">Группа
           <select id="attendanceGroupFilter">
@@ -1156,7 +1176,6 @@ function renderAttendance() {
                         <strong>${sub.totalProgressVisits}</strong>
                         <small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small>
                         <div class="row-actions">
-                          ${!isParent() ? `<button class="button secondary compact" data-attendance-qr="${student.id}" type="button">QR</button>` : ""}
                           <button class="button ghost compact" data-parent-messages="${student.id}" type="button">Сообщения</button>
                           <button class="button ghost compact" data-attendance-history="${student.id}" type="button">История</button>
                         </div>
@@ -1446,6 +1465,7 @@ function renderParentPortal() {
   return `
     <div class="toolbar">
       <button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>
+      ${isParent() ? `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>` : ""}
       ${isParent() ? `<button class="button secondary" data-edit-profile type="button">Редактировать профиль</button>` : ""}
       ${isAdmin() ? `<button class="button secondary" data-add-announcement type="button">+ Новость / скидка</button>` : ""}
       <span class="badge neutral">семейный кабинет</span>
@@ -2037,6 +2057,10 @@ function bindViewActions() {
   document.querySelectorAll("[data-attendance-qr]").forEach((button) => {
     button.addEventListener("click", () => openQrAttendanceModal(Number(button.dataset.attendanceQr)));
   });
+  document.querySelector("[data-unified-qr]")?.addEventListener("click", openUnifiedQrModal);
+  document.querySelectorAll("[data-open-parent-qr-scan]").forEach((button) => {
+    button.addEventListener("click", openParentQrScanModal);
+  });
   document.querySelectorAll("[data-parent-messages]").forEach((button) => {
     button.addEventListener("click", () => openParentMessagesModal(Number(button.dataset.parentMessages)));
   });
@@ -2257,6 +2281,88 @@ async function openQrAttendanceModal(studentId) {
     renderQr();
   });
   await renderQr();
+}
+
+function unifiedQrScanUrl() {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("scan", "attendance");
+  return url.toString();
+}
+
+function openUnifiedQrModal() {
+  const url = unifiedQrScanUrl();
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(url)}`;
+  openModal(
+    "Единый QR для посещения",
+    `<div class="profile-modal">
+      <div class="qr-card unified-qr-card">
+        <img src="${qrSrc}" alt="Единый QR S7 Robotics" />
+        <strong>Один QR для всех родителей</strong>
+        <small>Родитель сканирует код, входит в свой аккаунт, выбирает ребенка и подтверждает посещение. Доступ есть только к привязанным детям.</small>
+        <button class="button ghost" data-copy-text="${url}" type="button">Скопировать ссылку</button>
+      </div>
+      <div class="message-template">
+        <strong>Как использовать в центре</strong>
+        <p>Откройте этот QR на экране или распечатайте. Он не привязан к группе или ученику, поэтому подходит для всех уроков.</p>
+      </div>
+    </div>`,
+  );
+  bindCopyButtons(modalRoot);
+}
+
+function openParentQrScanModal() {
+  if (!isParent()) return;
+  const students = visibleStudents();
+  const today = new Date().toISOString().slice(0, 10);
+  openModal(
+    "QR отметка посещения",
+    `<form class="modal-form parent-qr-form" id="parentQrForm">
+      <label style="grid-column:1/-1">Ребенок
+        <select name="studentId" required>
+          ${students.map((student) => `<option value="${student.id}">${student.name} · ${student.group}</option>`).join("")}
+        </select>
+      </label>
+      <label>Дата урока<input name="date" type="date" required value="${today}" /></label>
+      <div class="qr-scan-note">
+        <strong>Подтверждение родителя</strong>
+        <small>После нажатия в табеле появится отметка «Был». Если детей несколько, выберите нужного.</small>
+      </div>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Подтвердить посещение</button>
+      </div>
+    </form>`,
+  );
+  const form = modalRoot.querySelector("#parentQrForm");
+  if (!students.length) {
+    form.innerHTML = `<div class="empty">К аккаунту пока не привязаны дети. Обратитесь к администратору.</div>`;
+    return;
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+    payload.studentId = Number(payload.studentId);
+    if (backendEnabled) {
+      await apiRequest("parent_qr_attendance", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.attendance.unshift({
+      id: Date.now(),
+      studentId: payload.studentId,
+      date: payload.date,
+      status: "present",
+      topic: "QR отметка родителя",
+      createdBy: currentUser.name,
+    });
+    syncStudentSubscription(payload.studentId);
+    saveState();
+    closeModal();
+    render();
+  });
 }
 
 function openParentMessagesModal(studentId) {

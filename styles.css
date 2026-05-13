@@ -1785,6 +1785,26 @@ td small {
   box-shadow: var(--shadow-soft);
 }
 
+.unified-qr-card img {
+  width: 260px;
+}
+
+.qr-scan-note {
+  display: grid;
+  gap: 4px;
+  align-self: end;
+  padding: 12px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eef6ff, #f7fbff);
+}
+
+.qr-scan-note small {
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.45;
+}
+
 .message-template {
   display: grid;
   gap: 10px;

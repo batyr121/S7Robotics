@@ -42,6 +42,7 @@ try {
         'delete_expense' => delete_simple($pdo, require_admin($pdo), $input, 'expenses'),
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'qr_attendance_link' => qr_attendance_link($pdo, require_user($pdo), $input),
+        'parent_qr_attendance' => parent_qr_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
         'create_parent_review' => create_parent_review($pdo, require_user($pdo), $input),
@@ -567,6 +568,24 @@ function qr_attendance(PDO $pdo): void
     $stmt->execute([$studentId, $date, 'present', 'QR отметка']);
     recalc_student_subscription($pdo, $studentId);
     respond(['ok' => true, 'message' => 'Посещение отмечено.']);
+}
+
+function parent_qr_attendance(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] !== 'parent') {
+        fail('QR отметка доступна только родителю.', 403);
+    }
+    $studentId = (int)required($input, 'studentId');
+    $date = (string)($input['date'] ?? date('Y-m-d'));
+    assert_student_access($pdo, $user, $studentId);
+    $stmt = $pdo->prepare('
+        insert into attendance (student_id, date, status, topic, created_by)
+        values (?, ?, ?, ?, ?)
+        on conflict(student_id, date) do update set status = excluded.status, topic = excluded.topic, created_by = excluded.created_by
+    ');
+    $stmt->execute([$studentId, $date, 'present', 'QR отметка родителя', (int)$user['id']]);
+    recalc_student_subscription($pdo, $studentId);
+    data_response($pdo, $user);
 }
 
 function qr_attendance_token(int $studentId, string $date): string
