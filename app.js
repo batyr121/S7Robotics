@@ -630,20 +630,37 @@ function updateAuthMode() {
   const registerForm = document.querySelector("#registerForm");
   const roleSelect = document.querySelector('#registerForm select[name="role"]');
   const groupsInput = document.querySelector('#registerForm input[name="groups"]');
-  if (!tabs || !roleSelect || !groupsInput || !loginTab || !registerTab || !loginForm || !registerForm) return;
+  const groupsField = document.querySelector("#registerGroupsField");
+  const childrenField = document.querySelector("#registerChildrenField");
+  const childrenSelect = document.querySelector('#registerForm select[name="childIds"]');
+  const registerHint = document.querySelector("#registerHint");
+  if (!tabs || !roleSelect || !groupsInput || !groupsField || !childrenField || !childrenSelect || !loginTab || !registerTab || !loginForm || !registerForm) return;
+  childrenSelect.innerHTML = (state.students || [])
+    .map((student) => `<option value="${student.id}">${student.name} · ${student.group}</option>`)
+    .join("");
   if (state.users.length === 0) {
     tabs.hidden = false;
     registerTab.hidden = false;
     roleSelect.value = "admin";
     roleSelect.disabled = true;
+    groupsField.hidden = false;
     groupsInput.disabled = true;
     groupsInput.placeholder = "Первый аккаунт получает полный доступ";
+    childrenField.hidden = true;
+    childrenSelect.disabled = true;
+    registerHint.textContent = "Первый аккаунт станет админом. После этого родители смогут регистрироваться сами.";
   } else {
-    registerTab.hidden = true;
-    loginTab.classList.add("active");
-    registerTab.classList.remove("active");
-    loginForm.hidden = false;
-    registerForm.hidden = true;
+    tabs.hidden = false;
+    registerTab.hidden = false;
+    roleSelect.value = "parent";
+    roleSelect.disabled = true;
+    groupsField.hidden = true;
+    groupsInput.disabled = true;
+    childrenField.hidden = false;
+    childrenSelect.disabled = false;
+    registerHint.textContent = childrenSelect.options.length
+      ? "Родитель выбирает своих детей и получает доступ только к ним."
+      : "Пока в CRM нет учеников для привязки. Обратитесь к администратору.";
   }
 }
 
@@ -1179,7 +1196,7 @@ function renderTrials() {
       <div class="card-header"><h3>Пробные уроки</h3><span class="badge active">${scheduled} активных</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Ребенок</th><th>Программа</th><th>Время</th><th>Группа</th><th>Ментор</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Ребенок</th><th>Программа</th><th>Время</th><th>Группа</th><th>Ментор</th><th>Статус</th><th>Действия</th></tr></thead>
           <tbody>
             ${
               trials
@@ -1196,9 +1213,10 @@ function renderTrials() {
                           ${trialStatusOptions(lesson.status)}
                         </select>
                       </td>
+                      <td>${isAdmin() ? `<button class="button danger compact" data-delete-trial="${lesson.id}" type="button">Удалить</button>` : `<span class="badge neutral">просмотр</span>`}</td>
                     </tr>`,
                 )
-                .join("") || `<tr><td colspan="6"><div class="empty">Пробные уроки пока не записаны</div></td></tr>`
+                .join("") || `<tr><td colspan="7"><div class="empty">Пробные уроки пока не записаны</div></td></tr>`
             }
           </tbody>
         </table>
@@ -1983,6 +2001,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-schedule]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("schedule", Number(button.dataset.deleteSchedule)));
   });
+  document.querySelectorAll("[data-delete-trial]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("trial", Number(button.dataset.deleteTrial)));
+  });
   document.querySelectorAll("[data-delete-salary]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("salary", Number(button.dataset.deleteSalary)));
   });
@@ -2451,6 +2472,7 @@ async function deleteRecord(type, id) {
     method: ["delete_method", "methods"],
     announcement: ["delete_announcement", "announcements"],
     expense: ["delete_expense", "expenses"],
+    trial: ["delete_trial", "trialLessons"],
   };
   const [action, key] = map[type];
   if (backendEnabled) {
@@ -3079,10 +3101,17 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 
 document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const formData = new FormData(event.currentTarget);
+  const form = Object.fromEntries(formData.entries());
+  const childIds = formData.getAll("childIds").map((id) => Number(id));
+  const firstUser = state.users.length === 0;
   if (backendEnabled) {
     try {
-      const data = await apiRequest("register_first_admin", form);
+      const data = await apiRequest(firstUser ? "register_first_admin" : "register_parent", {
+        ...form,
+        role: firstUser ? "admin" : "parent",
+        childIds,
+      });
       showAuthError("");
       applyAuthResponse(data);
     } catch (error) {
@@ -3090,27 +3119,22 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
     }
     return;
   }
-  if (state.users.length > 0) {
-    showAuthError("Публичная регистрация закрыта. Аккаунты создает администратор внутри CRM.");
-    updateAuthMode();
-    return;
-  }
   if (state.users.some((user) => user.email.toLowerCase() === form.email.toLowerCase())) {
     showAuthError("Такой email уже зарегистрирован.");
     return;
   }
-  const firstUser = state.users.length === 0;
-  if (!firstUser && form.role === "admin") {
-    showAuthError("Нового админа можно добавить только из настоящей серверной админ-панели. Сейчас создайте ментора.");
+  if (!firstUser && !childIds.length) {
+    showAuthError("Выберите хотя бы одного ребенка.");
     return;
   }
   const user = {
     id: Date.now(),
     name: form.name,
+    phone: form.phone || "",
     email: form.email,
     password: form.password,
-    role: firstUser ? "admin" : form.role,
-    groups: firstUser || form.role === "admin" ? [] : form.groups.split(",").map((group) => group.trim()).filter(Boolean),
+    role: firstUser ? "admin" : "parent",
+    groups: firstUser ? [] : childIds,
   };
   state.users.push(user);
   saveState();
@@ -3138,6 +3162,7 @@ async function initApp() {
   try {
     const status = await apiRequest("status");
     state.users = status.hasUsers ? [{ id: 0, name: "server", role: "admin", groups: [] }] : [];
+    state.students = status.students || [];
     const token = localStorage.getItem(TOKEN_KEY);
     if (token) {
       try {

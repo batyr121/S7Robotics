@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>S7 Robotics CRM</title>
-    <link rel="stylesheet" href="styles.css?v=14" />
+    <link rel="stylesheet" href="styles.css?v=15" />
   </head>
   <body>
     <section id="authScreen" class="auth-screen">
@@ -42,6 +42,10 @@
             <input name="email" type="email" required placeholder="mentor@s7.kz" />
           </label>
           <label>
+            Телефон
+            <input name="phone" placeholder="+7 777 000 00 00" />
+          </label>
+          <label>
             Пароль
             <input name="password" type="password" required minlength="4" />
           </label>
@@ -50,14 +54,19 @@
             <select name="role">
               <option value="admin">Админ</option>
               <option value="mentor">Ментор</option>
+              <option value="parent">Родитель</option>
             </select>
           </label>
-          <label>
+          <label id="registerGroupsField">
             Группы ментора
             <input name="groups" placeholder="A1, B2" />
           </label>
+          <label id="registerChildrenField" hidden>
+            Дети
+            <select name="childIds" multiple size="5"></select>
+          </label>
           <button class="button primary" type="submit">Создать аккаунт</button>
-          <p class="auth-hint">Первый аккаунт станет админом. Для ментора укажите группы через запятую.</p>
+          <p class="auth-hint" id="registerHint">Первый аккаунт станет админом. Для ментора укажите группы через запятую.</p>
         </form>
         <p id="authError" class="auth-error" aria-live="polite"></p>
       </div>
@@ -221,6 +230,6 @@
     </template>
 
     <div id="modalRoot" class="modal-root" hidden></div>
-    <script src="app.js?v=14"></script>
+    <script src="app.js?v=15"></script>
   </body>
 </html>

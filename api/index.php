@@ -25,9 +25,10 @@ $action = $_GET['action'] ?? $input['action'] ?? 'status';
 
 try {
     match ($action) {
-        'status' => respond(['hasUsers' => has_users($pdo)]),
+        'status' => respond(['hasUsers' => has_users($pdo), 'students' => public_student_options($pdo)]),
         'login' => login($pdo, $input),
         'register_first_admin' => register_first_admin($pdo, $input),
+        'register_parent' => register_parent($pdo, $input),
         'data' => data_response($pdo, require_user($pdo)),
         'logout' => logout($pdo, require_user($pdo)),
         'update_profile' => update_profile($pdo, require_user($pdo), $input),
@@ -53,6 +54,7 @@ try {
         'create_schedule' => create_schedule($pdo, require_admin($pdo), $input),
         'delete_schedule' => delete_simple($pdo, require_admin($pdo), $input, 'schedule'),
         'create_trial' => create_trial($pdo, require_admin($pdo), $input),
+        'delete_trial' => delete_simple($pdo, require_admin($pdo), $input, 'trial_lessons'),
         'update_trial_status' => update_trial_status($pdo, require_user($pdo), $input),
         'create_salary' => create_salary($pdo, require_admin($pdo), $input),
         'delete_salary' => delete_simple($pdo, require_admin($pdo), $input, 'salaries'),
@@ -303,6 +305,28 @@ function register_first_admin(PDO $pdo, array $input): void
         'password' => required($input, 'password'),
         'role' => 'admin',
         'groups' => [],
+    ]);
+    $user = get_user_by_id($pdo, $userId);
+    $token = create_session($pdo, $userId);
+    respond(['token' => $token, 'user' => public_user($user), 'state' => state_for_user($pdo, $user)]);
+}
+
+function register_parent(PDO $pdo, array $input): void
+{
+    if (!has_users($pdo)) {
+        fail('Сначала создайте аккаунт администратора.', 403);
+    }
+    $childIds = normalize_groups($input['childIds'] ?? $input['groups'] ?? []);
+    if (!$childIds) {
+        fail('Выберите хотя бы одного ребенка.', 422);
+    }
+    $userId = insert_user($pdo, [
+        'name' => required($input, 'name'),
+        'phone' => $input['phone'] ?? '',
+        'email' => required($input, 'email'),
+        'password' => required($input, 'password'),
+        'role' => 'parent',
+        'groups' => $childIds,
     ]);
     $user = get_user_by_id($pdo, $userId);
     $token = create_session($pdo, $userId);
@@ -927,7 +951,7 @@ function create_announcement(PDO $pdo, array $admin, array $input): void
 
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'trial_lessons'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -972,6 +996,17 @@ function all_users(PDO $pdo): array
 function all_students(PDO $pdo): array
 {
     return array_map('student_row', $pdo->query('select * from students order by created_at desc')->fetchAll());
+}
+
+function public_student_options(PDO $pdo): array
+{
+    $rows = $pdo->query('select id, name, group_name, parent from students order by name asc')->fetchAll();
+    return array_map(fn($row) => [
+        'id' => (int)$row['id'],
+        'name' => $row['name'],
+        'group' => $row['group_name'],
+        'parent' => $row['parent'],
+    ], $rows);
 }
 
 function mentor_students(PDO $pdo, array $user): array
