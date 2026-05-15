@@ -805,6 +805,7 @@ function renderDashboard() {
 
   return `
     ${dashboardLanding(students.length, active, present)}
+    ${!isParent() ? lessonLaunchPanel() : ""}
     <div class="stats-grid">
       ${stat("Ученики", students.length, isAdmin() ? "все группы" : "мои группы")}
       ${stat("Активные", active, "учатся сейчас")}
@@ -926,6 +927,59 @@ function renderParentDashboard() {
       </article>
     </div>
   `;
+}
+
+function lessonLaunchPanel() {
+  const lessons = lessonLaunchList().slice(0, 4);
+  if (!lessons.length) return "";
+  return `
+    <article class="card lesson-launch-card">
+      <div class="card-header">
+        <h3>Пульт урока</h3>
+        <span class="badge active">${lessons.length} ближайших</span>
+      </div>
+      <div class="lesson-launch-list">
+        ${lessons
+          .map(({ lesson, timing, students }) => `
+            <div class="lesson-launch-row">
+              <div>
+                <strong>${lesson.group} · ${lesson.time}</strong>
+                <small>${lesson.day} · ${lesson.mentor} · ${students.length} учеников</small>
+              </div>
+              <span class="badge ${timing.tone}">${timing.short}</span>
+              <button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Начать урок</button>
+            </div>`)
+          .join("")}
+      </div>
+    </article>`;
+}
+
+function lessonLaunchList() {
+  return visibleSchedule()
+    .map((lesson) => ({
+      lesson,
+      timing: lessonTimingStatus(lesson),
+      students: studentsForLesson(lesson),
+    }))
+    .filter(({ students }) => students.length)
+    .sort((a, b) => a.timing.rank - b.timing.rank || a.lesson.time.localeCompare(b.lesson.time));
+}
+
+function lessonTimingStatus(lesson) {
+  const day = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][new Date().getDay()];
+  if (lesson.day !== day) return { label: "не сегодня", short: "по расписанию", tone: "neutral", rank: 3 };
+  const [hours, minutes] = String(lesson.time || "00:00").split(":").map(Number);
+  const start = new Date();
+  start.setHours(hours || 0, minutes || 0, 0, 0);
+  const diff = Math.round((start - new Date()) / 60000);
+  if (diff < -120) return { label: "урок уже прошел", short: "прошел", tone: "neutral", rank: 2 };
+  if (diff <= 15 && diff >= -120) return { label: "можно начинать", short: "сейчас", tone: "active", rank: 0 };
+  if (diff > 15 && diff <= 90) return { label: `через ${diff} мин`, short: "скоро", tone: "soon", rank: 1 };
+  return { label: "сегодня позже", short: "сегодня", tone: "neutral", rank: 2 };
+}
+
+function studentsForLesson(lesson) {
+  return visibleStudents().filter((student) => student.group === lesson.group || student.mentor === lesson.mentor && student.group === lesson.group);
 }
 
 function dashboardLanding(totalStudents, activeStudents, visits) {
@@ -1243,14 +1297,22 @@ function renderSchedule() {
             ${
               lessons
                 .map(
-                  (lesson) => `
+                  (lesson) => {
+                    const timing = lessonTimingStatus(lesson);
+                    return `
                     <tr>
                       <td><strong>${lesson.day}</strong></td>
-                      <td>${lesson.time}</td>
+                      <td>${lesson.time}<small>${timing.label}</small></td>
                       <td>${lesson.group}</td>
                       <td>${lesson.mentor}</td>
-                      <td>${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : `<span class="badge neutral">просмотр</span>`}</td>
-                    </tr>`,
+                      <td>
+                        <div class="row-actions">
+                          ${!isParent() ? `<button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Начать урок</button>` : ""}
+                          ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : `<span class="badge ${timing.tone}">${timing.short}</span>`}
+                        </div>
+                      </td>
+                    </tr>`;
+                  },
                 )
                 .join("") || `<tr><td colspan="5"><div class="empty">Расписание пока не составлено</div></td></tr>`
             }
@@ -2186,6 +2248,9 @@ function bindViewActions() {
   });
   document.querySelectorAll("[data-delete-schedule]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("schedule", Number(button.dataset.deleteSchedule)));
+  });
+  document.querySelectorAll("[data-start-lesson]").forEach((button) => {
+    button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.startLesson)));
   });
   document.querySelectorAll("[data-delete-trial]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("trial", Number(button.dataset.deleteTrial)));
@@ -3220,6 +3285,197 @@ function openStudentModal(studentId = null) {
     closeModal();
     render();
   });
+}
+
+function openLessonModeModal(lessonId) {
+  if (isParent()) return;
+  const lesson = visibleSchedule().find((item) => Number(item.id) === Number(lessonId));
+  if (!lesson) return;
+  const students = studentsForLesson(lesson);
+  const today = new Date().toISOString().slice(0, 10);
+  const timing = lessonTimingStatus(lesson);
+  openModal(
+    `Урок · ${lesson.group}`,
+    `<form class="lesson-mode" id="lessonModeForm">
+      <div class="lesson-mode-hero">
+        <div>
+          <span class="badge ${timing.tone}">${timing.short}</span>
+          <h3>${lesson.group} · ${lesson.time}</h3>
+          <p>${lesson.day} · ${lesson.mentor} · ${students.length} учеников</p>
+        </div>
+        <div class="lesson-mode-score">
+          <strong>${lessonReadinessScore(lesson)}%</strong>
+          <small>готовность CRM</small>
+        </div>
+      </div>
+      <div class="lesson-check-strip">
+        ${lessonMicroCheck("Тема", true)}
+        ${lessonMicroCheck("Посещаемость", students.length > 0)}
+        ${lessonMicroCheck("Фотоотчет", false)}
+        ${lessonMicroCheck("Домашка", false)}
+      </div>
+      <div class="modal-form">
+        <label>Дата урока<input name="date" type="date" required value="${today}" /></label>
+        <label>Тема урока<input name="topic" required placeholder="Например, датчики расстояния и движение" /></label>
+        <label style="grid-column:1/-1">Цель урока<textarea name="goal" placeholder="Коротко: что дети должны собрать или понять к концу занятия"></textarea></label>
+      </div>
+      <section class="lesson-mode-section">
+        <div class="section-title">
+          <strong>Посещаемость</strong>
+          <small>Первые 2 НБ не списываются, дальше логика абонемента сработает автоматически.</small>
+        </div>
+        <div class="lesson-attendance-list">
+          ${students.map((student) => lessonStudentRow(student)).join("") || `<div class="empty">В этой группе пока нет учеников</div>`}
+        </div>
+      </section>
+      <section class="lesson-mode-section">
+        <div class="section-title">
+          <strong>Фотоотчет родителям</strong>
+          <small>Отправится всем ученикам со статусом «Был».</small>
+        </div>
+        <div class="modal-form">
+          <label>Заголовок<input name="reportTitle" placeholder="Например, Собрали робота на датчике" /></label>
+          <label>Ссылка на фото<input name="photoUrl" type="url" placeholder="https://..." /></label>
+          <label style="grid-column:1/-1">Текст фотоотчета<textarea name="reportText" placeholder="Что делали, что получилось, что ребенок сможет рассказать дома"></textarea></label>
+        </div>
+      </section>
+      <section class="lesson-mode-section">
+        <div class="section-title">
+          <strong>Домашнее задание</strong>
+          <small>Можно выдать сразу всей группе или только тем, кто был на уроке.</small>
+        </div>
+        <div class="modal-form">
+          <label>Название<input name="homeworkTitle" placeholder="Повторить схему движения" /></label>
+          <label>Срок<input name="dueDate" type="date" /></label>
+          <label>Кому<select name="homeworkAudience"><option value="all">Всем ученикам группы</option><option value="present">Только присутствующим</option></select></label>
+          <label style="grid-column:1/-1">Задание<textarea name="homeworkText" placeholder="Что сделать дома или что подготовить к следующему уроку"></textarea></label>
+        </div>
+      </section>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Завершить и сохранить урок</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#lessonModeForm").addEventListener("submit", (event) => saveLessonMode(event, lesson, students));
+}
+
+function lessonMicroCheck(title, done) {
+  return `<span class="${done ? "done" : ""}">${done ? "✓" : "•"} ${title}</span>`;
+}
+
+function lessonStudentRow(student) {
+  const sub = subscriptionStatus(student);
+  const risk = sub.needsPayment ? "payment" : sub.needsDirectorLetter ? "absence" : "";
+  return `
+    <label class="lesson-student-row ${risk}">
+      <span>
+        <strong>${student.name}</strong>
+        <small>#${sub.currentSubscriptionNumber} · ${sub.visitLabel} · ${sub.remaining} осталось${risk === "payment" ? " · нужна оплата" : ""}${risk === "absence" ? " · письмо по НБ" : ""}</small>
+      </span>
+      <select name="attendance-${student.id}">
+        <option value="present">Был</option>
+        <option value="absent">НБ</option>
+        <option value="skip">Не отмечать</option>
+      </select>
+    </label>`;
+}
+
+function lessonReadinessScore(lesson) {
+  const students = studentsForLesson(lesson);
+  if (!students.length) return 0;
+  const withPayments = students.filter((student) => !subscriptionStatus(student).expired).length;
+  const withFeedback = students.filter((student) => latestFeedbackDate(student.id)).length;
+  return Math.round(((withPayments + withFeedback) / (students.length * 2)) * 100);
+}
+
+async function saveLessonMode(event, lesson, students) {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const presentIds = [];
+  const attendanceItems = students
+    .map((student) => {
+      const status = form[`attendance-${student.id}`];
+      if (status === "present") presentIds.push(Number(student.id));
+      if (status === "skip") return null;
+      return {
+        studentId: Number(student.id),
+        date: form.date,
+        status,
+        topic: form.topic,
+      };
+    })
+    .filter(Boolean);
+  const homeworkAudience = form.homeworkAudience === "present" ? presentIds : students.map((student) => Number(student.id));
+  const shouldReport = form.reportTitle?.trim() && form.reportText?.trim() && presentIds.length;
+  const shouldHomework = form.homeworkTitle?.trim() && form.homeworkText?.trim() && homeworkAudience.length;
+
+  if (backendEnabled) {
+    for (const item of attendanceItems) await apiRequest("create_attendance", item);
+    if (shouldReport) {
+      for (const studentId of presentIds) {
+        await apiRequest("create_photo_report", {
+          studentId,
+          date: form.date,
+          title: form.reportTitle,
+          text: form.reportText,
+          photoUrl: form.photoUrl,
+          mentor: lesson.mentor,
+        });
+      }
+    }
+    if (shouldHomework) {
+      await apiRequest("create_homework", {
+        studentIds: homeworkAudience,
+        title: form.homeworkTitle,
+        text: form.homeworkText,
+        dueDate: form.dueDate,
+      });
+    }
+    closeModal();
+    await refreshData();
+    return;
+  }
+
+  attendanceItems.forEach((item, index) => {
+    const existing = state.attendance.find((record) => Number(record.studentId) === Number(item.studentId) && record.date === item.date);
+    if (existing) {
+      existing.status = item.status;
+      existing.topic = item.topic;
+    } else {
+      state.attendance.unshift({ ...item, id: Date.now() + index, createdBy: currentUser.name });
+    }
+    syncStudentSubscription(item.studentId);
+  });
+  if (shouldReport) {
+    presentIds.forEach((studentId, index) => {
+      state.photoReports.unshift({
+        id: Date.now() + 100 + index,
+        studentId,
+        mentor: lesson.mentor,
+        title: form.reportTitle,
+        text: form.reportText,
+        photoUrl: form.photoUrl,
+        date: form.date,
+      });
+    });
+  }
+  if (shouldHomework) {
+    homeworkAudience.forEach((studentId, index) => {
+      state.homework.unshift({
+        id: Date.now() + 200 + index,
+        studentId,
+        title: form.homeworkTitle,
+        text: form.homeworkText,
+        dueDate: form.dueDate,
+        status: "assigned",
+        createdBy: currentUser.name,
+      });
+    });
+  }
+  saveState();
+  closeModal();
+  render();
 }
 
 function openAttendanceModal(selectedStudentId = null) {

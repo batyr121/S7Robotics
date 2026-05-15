@@ -1983,6 +1983,165 @@ td small {
   margin-bottom: 8px;
 }
 
+.lesson-launch-card {
+  margin-bottom: 14px;
+}
+
+.lesson-launch-list {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px 18px;
+}
+
+.lesson-launch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(29, 111, 232, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff, #f1f7ff);
+}
+
+.lesson-launch-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.lesson-mode {
+  display: grid;
+  gap: 16px;
+}
+
+.lesson-mode-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(18, 168, 122, 0.16), transparent 28%),
+    linear-gradient(135deg, #ffffff, #eef6ff);
+}
+
+.lesson-mode-hero h3 {
+  margin: 10px 0 4px;
+  color: var(--blue-950);
+  font-size: 26px;
+}
+
+.lesson-mode-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.lesson-mode-score {
+  width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue-600), var(--green));
+  color: white;
+  box-shadow: 0 16px 36px rgba(29, 111, 232, 0.22);
+}
+
+.lesson-mode-score strong {
+  font-size: 30px;
+}
+
+.lesson-mode-score small {
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.lesson-check-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lesson-check-strip span {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f8fbff;
+  color: var(--muted);
+  text-align: center;
+  font-weight: 850;
+}
+
+.lesson-check-strip .done {
+  border-color: rgba(18, 168, 122, 0.22);
+  background: rgba(18, 168, 122, 0.10);
+  color: #08785a;
+}
+
+.lesson-mode-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fbfdff;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--blue-950);
+}
+
+.section-title small {
+  max-width: 520px;
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.lesson-attendance-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lesson-student-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+}
+
+.lesson-student-row.payment {
+  border-color: rgba(245, 165, 36, 0.32);
+  background: rgba(245, 165, 36, 0.08);
+}
+
+.lesson-student-row.absence {
+  border-color: rgba(226, 75, 91, 0.28);
+  background: rgba(226, 75, 91, 0.08);
+}
+
+.lesson-student-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .lesson-pill {
   display: block;
   margin-top: 6px;
@@ -2302,8 +2461,22 @@ td small {
   .season-summary,
   .weekly-missions,
   .season-pass,
-  .photo-report-grid {
+  .photo-report-grid,
+  .lesson-check-strip,
+  .lesson-attendance-list {
     grid-template-columns: 1fr;
+  }
+
+  .lesson-launch-row,
+  .lesson-mode-hero,
+  .section-title,
+  .lesson-student-row {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-mode-hero,
+  .section-title {
+    display: grid;
   }
 }
 
