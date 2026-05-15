@@ -2,6 +2,8 @@ const STORAGE_KEY = "s7robotics-crm-v3";
 const SESSION_KEY = "s7robotics-session-v1";
 const API_URL = "api/index.php";
 const TOKEN_KEY = "s7robotics-api-token";
+const LESSON_SESSION_KEY = "s7robotics-active-lesson-v1";
+const LESSON_DURATION_MINUTES = 90;
 const SEASON_LEVEL_XP = 1000;
 const SEASON_REWARDS = [
   { level: 1, title: "Старт сезона", text: "цифровой бейдж ученика S7" },
@@ -71,6 +73,7 @@ let searchTerm = "";
 let attendanceGroup = "all";
 let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
 let parentQrScanHandled = false;
+let lessonTimerId = null;
 
 function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -170,6 +173,7 @@ function logout() {
   }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(SESSION_KEY);
+  clearActiveLessonSession();
   currentUser = null;
   renderShell();
 }
@@ -772,9 +776,10 @@ function render() {
     salary: renderSalary,
     team: renderTeam,
   };
-  appView.innerHTML = renderers[activeView]();
+  appView.innerHTML = `${activeLessonBanner()}${renderers[activeView]()}`;
   bindViewActions();
   updateToday();
+  syncLessonTimer();
 }
 
 function updateToday() {
@@ -927,6 +932,88 @@ function renderParentDashboard() {
       </article>
     </div>
   `;
+}
+
+function activeLessonBanner() {
+  const session = getActiveLessonSession();
+  if (!session || isParent()) return "";
+  const remaining = lessonRemaining(session);
+  const done = remaining.total <= 0;
+  return `
+    <section class="active-lesson-banner ${done ? "ended" : ""}">
+      <div>
+        <span class="badge ${done ? "overdue" : "active"}">${done ? "время вышло" : "урок идет"}</span>
+        <strong>${session.group} · ${session.time}</strong>
+        <small>${session.mentor} · ${session.studentsCount || 0} учеников · старт ${formatClock(session.startedAt)}</small>
+      </div>
+      <div class="lesson-timer" data-lesson-timer>${remaining.label}</div>
+      <div class="row-actions">
+        <button class="button secondary compact" data-resume-lesson="${session.lessonId}" type="button">Открыть пульт</button>
+        <button class="button ghost compact" data-end-active-lesson type="button">Скрыть</button>
+      </div>
+    </section>`;
+}
+
+function startLessonSession(lesson, students) {
+  const now = Date.now();
+  const session = {
+    lessonId: Number(lesson.id),
+    group: lesson.group,
+    time: lesson.time,
+    day: lesson.day,
+    mentor: lesson.mentor,
+    studentsCount: students.length,
+    startedAt: new Date(now).toISOString(),
+    endAt: new Date(now + LESSON_DURATION_MINUTES * 60000).toISOString(),
+  };
+  localStorage.setItem(LESSON_SESSION_KEY, JSON.stringify(session));
+}
+
+function getActiveLessonSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem(LESSON_SESSION_KEY) || "null");
+    return session?.lessonId ? session : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveLessonSession() {
+  localStorage.removeItem(LESSON_SESSION_KEY);
+  if (lessonTimerId) clearInterval(lessonTimerId);
+  lessonTimerId = null;
+}
+
+function lessonRemaining(session) {
+  const total = new Date(session.endAt) - new Date();
+  const safe = Math.max(0, total);
+  const minutes = Math.floor(safe / 60000);
+  const seconds = Math.floor((safe % 60000) / 1000);
+  return {
+    total,
+    label: `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
+  };
+}
+
+function formatClock(date) {
+  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(date));
+}
+
+function syncLessonTimer() {
+  if (lessonTimerId) clearInterval(lessonTimerId);
+  if (!getActiveLessonSession() || isParent()) return;
+  lessonTimerId = setInterval(() => {
+    const session = getActiveLessonSession();
+    const timer = document.querySelector("[data-lesson-timer]");
+    if (!session || !timer) {
+      clearInterval(lessonTimerId);
+      lessonTimerId = null;
+      return;
+    }
+    const remaining = lessonRemaining(session);
+    timer.textContent = remaining.label;
+    document.querySelector(".active-lesson-banner")?.classList.toggle("ended", remaining.total <= 0);
+  }, 1000);
 }
 
 function lessonLaunchPanel() {
@@ -2252,6 +2339,13 @@ function bindViewActions() {
   document.querySelectorAll("[data-start-lesson]").forEach((button) => {
     button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.startLesson)));
   });
+  document.querySelectorAll("[data-resume-lesson]").forEach((button) => {
+    button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.resumeLesson), { keepSession: true }));
+  });
+  document.querySelector("[data-end-active-lesson]")?.addEventListener("click", () => {
+    clearActiveLessonSession();
+    render();
+  });
   document.querySelectorAll("[data-delete-trial]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("trial", Number(button.dataset.deleteTrial)));
   });
@@ -3287,11 +3381,15 @@ function openStudentModal(studentId = null) {
   });
 }
 
-function openLessonModeModal(lessonId) {
+function openLessonModeModal(lessonId, options = {}) {
   if (isParent()) return;
   const lesson = visibleSchedule().find((item) => Number(item.id) === Number(lessonId));
   if (!lesson) return;
   const students = studentsForLesson(lesson);
+  if (!options.keepSession) {
+    startLessonSession(lesson, students);
+    render();
+  }
   const today = new Date().toISOString().slice(0, 10);
   const timing = lessonTimingStatus(lesson);
   openModal(
@@ -3326,6 +3424,15 @@ function openLessonModeModal(lessonId) {
         </div>
         <div class="lesson-attendance-list">
           ${students.map((student) => lessonStudentRow(student)).join("") || `<div class="empty">В этой группе пока нет учеников</div>`}
+        </div>
+      </section>
+      <section class="lesson-mode-section">
+        <div class="section-title">
+          <strong>Автофидбек</strong>
+          <small>Выберите короткий статус, CRM сама составит аккуратный комментарий для каждого присутствующего ученика.</small>
+        </div>
+        <div class="lesson-feedback-list">
+          ${students.map((student) => lessonFeedbackRow(student)).join("") || `<div class="empty">Нет учеников для фидбека</div>`}
         </div>
       </section>
       <section class="lesson-mode-section">
@@ -3381,6 +3488,23 @@ function lessonStudentRow(student) {
     </label>`;
 }
 
+function lessonFeedbackRow(student) {
+  return `
+    <label class="lesson-feedback-row">
+      <span>
+        <strong>${student.name}</strong>
+        <small>${programProgress(student).title} · урок ${programProgress(student).nextLesson}</small>
+      </span>
+      <select name="feedback-${student.id}">
+        <option value="progress">Сильный прогресс</option>
+        <option value="good">Хорошо работал</option>
+        <option value="help">Нужна помощь</option>
+        <option value="focus">Фокус и дисциплина</option>
+        <option value="skip">Не добавлять</option>
+      </select>
+    </label>`;
+}
+
 function lessonReadinessScore(lesson) {
   const students = studentsForLesson(lesson);
   if (!students.length) return 0;
@@ -3409,9 +3533,12 @@ async function saveLessonMode(event, lesson, students) {
   const homeworkAudience = form.homeworkAudience === "present" ? presentIds : students.map((student) => Number(student.id));
   const shouldReport = form.reportTitle?.trim() && form.reportText?.trim() && presentIds.length;
   const shouldHomework = form.homeworkTitle?.trim() && form.homeworkText?.trim() && homeworkAudience.length;
+  const feedbackItems = buildLessonFeedbackItems(form, lesson, students, presentIds);
+  const taskItems = buildAfterLessonTasks(lesson, students, form, presentIds, shouldReport, shouldHomework);
 
   if (backendEnabled) {
     for (const item of attendanceItems) await apiRequest("create_attendance", item);
+    for (const item of feedbackItems) await apiRequest("create_feedback", item);
     if (shouldReport) {
       for (const studentId of presentIds) {
         await apiRequest("create_photo_report", {
@@ -3432,6 +3559,8 @@ async function saveLessonMode(event, lesson, students) {
         dueDate: form.dueDate,
       });
     }
+    for (const task of taskItems) await apiRequest("create_task", task);
+    clearActiveLessonSession();
     closeModal();
     await refreshData();
     return;
@@ -3446,6 +3575,9 @@ async function saveLessonMode(event, lesson, students) {
       state.attendance.unshift({ ...item, id: Date.now() + index, createdBy: currentUser.name });
     }
     syncStudentSubscription(item.studentId);
+  });
+  feedbackItems.forEach((item, index) => {
+    state.feedback.unshift({ ...item, id: Date.now() + 50 + index });
   });
   if (shouldReport) {
     presentIds.forEach((studentId, index) => {
@@ -3473,9 +3605,102 @@ async function saveLessonMode(event, lesson, students) {
       });
     });
   }
+  taskItems.forEach((task, index) => {
+    state.tasks.unshift({
+      ...task,
+      id: Date.now() + 300 + index,
+      status: "todo",
+      createdBy: currentUser.name,
+    });
+  });
   saveState();
+  clearActiveLessonSession();
   closeModal();
   render();
+}
+
+function buildLessonFeedbackItems(form, lesson, students, presentIds) {
+  return students
+    .filter((student) => presentIds.includes(Number(student.id)))
+    .map((student) => {
+      const type = form[`feedback-${student.id}`] || "skip";
+      if (type === "skip") return null;
+      return {
+        studentId: Number(student.id),
+        mentor: lesson.mentor,
+        skill: feedbackSkillLabel(type),
+        text: feedbackTemplateText(type, student, form),
+        date: form.date,
+      };
+    })
+    .filter(Boolean);
+}
+
+function feedbackSkillLabel(type) {
+  return {
+    progress: "Сильный прогресс",
+    good: "Работа на уроке",
+    help: "Нужна поддержка",
+    focus: "Фокус и дисциплина",
+  }[type] || "Фидбек урока";
+}
+
+function feedbackTemplateText(type, student, form) {
+  const topic = form.topic || "теме урока";
+  const goal = form.goal ? ` Цель урока: ${form.goal}` : "";
+  const templates = {
+    progress: `${student.name} сегодня уверенно продвинулся(ась) по теме «${topic}»: хорошо включался(ась) в практику и стал(а) ближе к самостоятельной сборке.${goal}`,
+    good: `${student.name} хорошо работал(а) на уроке по теме «${topic}»: выполнял(а) задания, задавал(а) вопросы и держал(а) рабочий темп.${goal}`,
+    help: `${student.name} сегодня проходил(а) тему «${topic}», но местами нужна дополнительная поддержка. На следующем уроке закрепим сложный момент и дадим больше практики.${goal}`,
+    focus: `${student.name} работал(а) по теме «${topic}». Главная зона роста сейчас: внимательность к инструкции и аккуратное завершение каждого шага.${goal}`,
+  };
+  return templates[type] || templates.good;
+}
+
+function buildAfterLessonTasks(lesson, students, form, presentIds, hasReport, hasHomework) {
+  const tasks = [];
+  const today = form.date || new Date().toISOString().slice(0, 10);
+  students.forEach((student) => {
+    const status = form[`attendance-${student.id}`];
+    const sub = subscriptionStatus(student);
+    if (status === "absent") {
+      tasks.push({
+        title: `Связаться с родителем: ${student.name}`,
+        description: `${student.name} отсутствовал(а) на уроке ${lesson.group} ${formatDate(today)}. Уточнить причину и напомнить по правилам НБ.`,
+        assignee: isAdmin() ? lesson.mentor : currentUser.name,
+        priority: sub.needsDirectorLetter ? "overdue" : "soon",
+        dueDate: today,
+      });
+    }
+    if (sub.needsPayment) {
+      tasks.push({
+        title: `Напомнить оплату: ${student.name}`,
+        description: `У ${student.name} абонемент #${sub.currentSubscriptionNumber}, использовано ${sub.visitLabel}. Нужно проконтролировать оплату.`,
+        assignee: isAdmin() ? lesson.mentor : currentUser.name,
+        priority: sub.expired ? "overdue" : "soon",
+        dueDate: today,
+      });
+    }
+  });
+  if (presentIds.length && !hasReport) {
+    tasks.push({
+      title: `Добавить фотоотчет: ${lesson.group}`,
+      description: `После урока по теме «${form.topic || "без темы"}» не заполнен фотоотчет для родителей.`,
+      assignee: isAdmin() ? lesson.mentor : currentUser.name,
+      priority: "soon",
+      dueDate: today,
+    });
+  }
+  if (presentIds.length && !hasHomework) {
+    tasks.push({
+      title: `Проверить домашку: ${lesson.group}`,
+      description: "Домашнее задание не выдано. Если оно не нужно, задачу можно закрыть.",
+      assignee: isAdmin() ? lesson.mentor : currentUser.name,
+      priority: "active",
+      dueDate: today,
+    });
+  }
+  return tasks;
 }
 
 function openAttendanceModal(selectedStudentId = null) {

@@ -1987,6 +1987,54 @@ td small {
   margin-bottom: 14px;
 }
 
+.active-lesson-banner {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(18, 168, 122, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 8% 10%, rgba(18, 168, 122, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(236, 248, 255, 0.98));
+  box-shadow: 0 18px 44px rgba(8, 36, 77, 0.13);
+  backdrop-filter: blur(12px);
+}
+
+.active-lesson-banner.ended {
+  border-color: rgba(226, 75, 91, 0.26);
+  background: linear-gradient(135deg, #ffffff, #fff3f4);
+}
+
+.active-lesson-banner strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--blue-950);
+  font-size: 18px;
+}
+
+.active-lesson-banner small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.lesson-timer {
+  min-width: 110px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--blue-950);
+  color: white;
+  font-size: 24px;
+  font-weight: 950;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .lesson-launch-list {
   display: grid;
   gap: 10px;
@@ -2113,7 +2161,14 @@ td small {
   gap: 10px;
 }
 
-.lesson-student-row {
+.lesson-feedback-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lesson-student-row,
+.lesson-feedback-row {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px;
@@ -2123,6 +2178,12 @@ td small {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: white;
+}
+
+.lesson-feedback-row {
+  grid-template-columns: minmax(0, 1fr) 180px;
+  border-color: rgba(29, 111, 232, 0.14);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
 .lesson-student-row.payment {
@@ -2135,7 +2196,8 @@ td small {
   background: rgba(226, 75, 91, 0.08);
 }
 
-.lesson-student-row small {
+.lesson-student-row small,
+.lesson-feedback-row small {
   display: block;
   margin-top: 3px;
   color: var(--muted);
@@ -2463,14 +2525,17 @@ td small {
   .season-pass,
   .photo-report-grid,
   .lesson-check-strip,
-  .lesson-attendance-list {
+  .lesson-attendance-list,
+  .lesson-feedback-list,
+  .active-lesson-banner {
     grid-template-columns: 1fr;
   }
 
   .lesson-launch-row,
   .lesson-mode-hero,
   .section-title,
-  .lesson-student-row {
+  .lesson-student-row,
+  .lesson-feedback-row {
     grid-template-columns: 1fr;
   }
 
