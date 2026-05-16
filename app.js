@@ -3723,7 +3723,7 @@ function openAttendanceModal(selectedStudentId = null) {
       ${studentSelectField(visibleStudents(), selectedStudentId)}
       <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
       <label>Статус<select name="status"><option value="present">Был</option><option value="absent">Не был</option></select></label>
-      <label>Тема урока<input name="topic" required placeholder="Например, моторы и датчики" /></label>
+      <label>Тема урока<input name="topic" value="Ручная отметка" placeholder="Например, моторы и датчики" /></label>
       <div class="form-alert">Можно выбрать любую прошлую дату, она попадет в абонемент и историю ученика.</div>
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
@@ -3731,13 +3731,25 @@ function openAttendanceModal(selectedStudentId = null) {
   modalRoot.querySelector("#attendanceForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const item = Object.fromEntries(new FormData(event.currentTarget).entries());
+    item.studentId = Number(item.studentId);
+    item.topic = item.topic?.trim() || "Ручная отметка";
     if (backendEnabled) {
-      await apiRequest("create_attendance", item);
-      closeModal();
-      await refreshData();
+      try {
+        await apiRequest("create_attendance", item);
+        closeModal();
+        await refreshData();
+      } catch (error) {
+        modalRoot.querySelector("#attendanceForm").insertAdjacentHTML("afterbegin", `<div class="form-alert">${error.message}</div>`);
+      }
       return;
     }
-    state.attendance.unshift({ ...item, id: Date.now(), studentId: Number(item.studentId) });
+    const existing = state.attendance.find((record) => Number(record.studentId) === Number(item.studentId) && record.date === item.date);
+    if (existing) {
+      existing.status = item.status;
+      existing.topic = item.topic;
+    } else {
+      state.attendance.unshift({ ...item, id: Date.now() });
+    }
     syncStudentSubscription(item.studentId);
     saveState();
     closeModal();

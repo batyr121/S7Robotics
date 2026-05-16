@@ -561,17 +561,18 @@ function create_attendance(PDO $pdo, array $user, array $input): void
         fail('Родитель не может менять табель.', 403);
     }
     $studentId = (int)required($input, 'studentId');
+    $topic = trim((string)($input['topic'] ?? '')) ?: 'Ручная отметка';
     assert_student_access($pdo, $user, $studentId);
     $stmt = $pdo->prepare('
         insert into attendance (student_id, date, status, topic, created_by)
         values (?, ?, ?, ?, ?)
-        on conflict(student_id, date) do update set status = excluded.status, topic = excluded.topic
+        on conflict(student_id, date) do update set status = excluded.status, topic = excluded.topic, created_by = excluded.created_by
     ');
     $stmt->execute([
         $studentId,
         required($input, 'date'),
         $input['status'] ?? 'present',
-        required($input, 'topic'),
+        $topic,
         (int)$user['id'],
     ]);
     recalc_student_subscription($pdo, $studentId);
