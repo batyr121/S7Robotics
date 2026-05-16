@@ -1506,7 +1506,7 @@ function attendanceSlotCell(studentId, slotIndex, record) {
   const tag = (className, text, title = "") => `<span class="mark ${className}" title="${title}">${text}</span>`;
   if (!record) {
     if (isParent()) return `<td>${tag("missed", "-")}</td>`;
-    return `<td><button class="mark missed" data-quick-attendance="${studentId}" title="Отметить занятие ${slotIndex + 1}" type="button">${slotIndex + 1}</button></td>`;
+    return `<td><button class="mark missed" data-quick-attendance="${studentId}:${slotIndex}" title="Отметить занятие ${slotIndex + 1}" type="button">${slotIndex + 1}</button></td>`;
   }
   const mark = record.status === "present" ? "Б" : "НБ";
   const label = `${formatDate(record.date)} · ${record.topic}`;
@@ -2320,7 +2320,7 @@ function bindViewActions() {
     button.addEventListener("click", () => openAttendanceModal(Number(button.dataset.addAttendanceStudent)));
   });
   document.querySelectorAll("[data-quick-attendance]").forEach((button) => {
-    button.addEventListener("click", () => quickMarkAttendance(Number(button.dataset.quickAttendance)));
+    button.addEventListener("click", () => quickMarkAttendance(button.dataset.quickAttendance));
   });
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
@@ -2427,27 +2427,39 @@ function bindViewActions() {
   });
 }
 
-async function quickMarkAttendance(studentId) {
+function nextAvailableAttendanceDate(studentId) {
+  const usedDates = new Set((state.attendance || []).filter((item) => Number(item.studentId) === Number(studentId)).map((item) => item.date));
+  const cursor = new Date();
+  cursor.setHours(12, 0, 0, 0);
+  for (let offset = 0; offset < 365; offset += 1) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (!usedDates.has(date)) return date;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function quickMarkAttendance(payload) {
+  const [studentIdRaw] = String(payload).split(":");
+  const studentId = Number(studentIdRaw);
   const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
   if (!student || isParent()) return;
   const item = {
     studentId: Number(studentId),
-    date: new Date().toISOString().slice(0, 10),
+    date: nextAvailableAttendanceDate(studentId),
     status: "present",
     topic: "Быстрая отметка",
   };
   if (backendEnabled) {
-    await apiRequest("create_attendance", item);
-    await refreshData();
+    try {
+      await apiRequest("create_attendance", item);
+      await refreshData();
+    } catch (error) {
+      alert(error.message);
+    }
     return;
   }
-  const existing = state.attendance.find((record) => Number(record.studentId) === Number(studentId) && record.date === item.date);
-  if (existing) {
-    existing.status = "present";
-    existing.topic = item.topic;
-  } else {
-    state.attendance.unshift({ ...item, id: Date.now() });
-  }
+  state.attendance.unshift({ ...item, id: Date.now() });
   syncStudentSubscription(studentId);
   saveState();
   render();
