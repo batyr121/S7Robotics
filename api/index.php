@@ -675,20 +675,8 @@ function toggle_attendance(PDO $pdo, array $user, array $input): void
 function recalc_student_subscription(PDO $pdo, int $studentId): void
 {
     $paidTotal = paid_lessons_total($pdo, $studentId);
-    $startDate = first_paid_payment_date($pdo, $studentId);
-    if (!$startDate) {
-        $stmt = $pdo->prepare('select next_payment from students where id = ?');
-        $stmt->execute([$studentId]);
-        $startDate = $stmt->fetchColumn();
-    }
-
-    if ($startDate) {
-        $stmt = $pdo->prepare('select status from attendance where student_id = ? and date >= ? order by date asc, id asc');
-        $stmt->execute([$studentId, $startDate]);
-    } else {
-        $stmt = $pdo->prepare('select status from attendance where student_id = ? order by date asc, id asc');
-        $stmt->execute([$studentId]);
-    }
+    $stmt = $pdo->prepare('select status from attendance where student_id = ? order by date asc, id asc');
+    $stmt->execute([$studentId]);
     $present = 0;
     $absent = 0;
     foreach ($stmt->fetchAll() as $record) {

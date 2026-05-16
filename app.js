@@ -313,6 +313,18 @@ function studentAttendanceSince(studentId, startDate = null) {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+function earliestAttendanceDate(studentId) {
+  return (state.attendance || [])
+    .filter((item) => Number(item.studentId) === Number(studentId))
+    .map((item) => item.date)
+    .sort()
+    .at(0) || "";
+}
+
+function earliestDate(...dates) {
+  return dates.filter(Boolean).sort()[0] || null;
+}
+
 function attendanceSubscriptionUsage(studentId, startDate = null) {
   const records = studentAttendanceSince(studentId, startDate);
   const present = records.filter((item) => item.status === "present").length;
@@ -344,7 +356,8 @@ function subscriptionStatus(student) {
   const payments = studentPayments(student.id);
   const lastPayment = payments[0];
   const firstPayment = payments.at(-1);
-  const startDate = firstPayment?.date || student.nextPayment || null;
+  const paymentStartDate = firstPayment?.date || student.nextPayment || null;
+  const startDate = earliestDate(paymentStartDate, earliestAttendanceDate(student.id));
   const usage = attendanceSubscriptionUsage(student.id, startDate);
   const manualSubscription = Math.max(1, Number(student.subscriptionNumber || 1));
   const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + usage.used);
@@ -3711,6 +3724,7 @@ function openAttendanceModal(selectedStudentId = null) {
       <label>Дата<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
       <label>Статус<select name="status"><option value="present">Был</option><option value="absent">Не был</option></select></label>
       <label>Тема урока<input name="topic" required placeholder="Например, моторы и датчики" /></label>
+      <div class="form-alert">Можно выбрать любую прошлую дату, она попадет в абонемент и историю ученика.</div>
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
   );
