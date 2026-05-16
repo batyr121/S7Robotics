@@ -1506,12 +1506,12 @@ function attendanceSlotCell(studentId, slotIndex, record) {
   const tag = (className, text, title = "") => `<span class="mark ${className}" title="${title}">${text}</span>`;
   if (!record) {
     if (isParent()) return `<td>${tag("missed", "-")}</td>`;
-    return `<td><button class="mark missed" data-add-attendance-student="${studentId}" title="Добавить дату занятия ${slotIndex + 1}" type="button">${slotIndex + 1}</button></td>`;
+    return `<td><button class="mark missed" data-quick-attendance="${studentId}" title="Отметить занятие ${slotIndex + 1}" type="button">${slotIndex + 1}</button></td>`;
   }
   const mark = record.status === "present" ? "Б" : "НБ";
   const label = `${formatDate(record.date)} · ${record.topic}`;
-  if (isParent()) return `<td>${tag(record.status, mark, label)}<small>${formatDate(record.date)}</small></td>`;
-  return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${record.date}" title="${label}" type="button">${mark}</button><small>${formatDate(record.date)}</small></td>`;
+  if (isParent()) return `<td>${tag(record.status, mark, label)}</td>`;
+  return `<td><button class="mark ${record.status}" data-toggle-attendance="${studentId}:${record.date}" title="${label}" type="button">${mark}</button></td>`;
 }
 
 function renderPayments() {
@@ -2319,6 +2319,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-add-attendance-student]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceModal(Number(button.dataset.addAttendanceStudent)));
   });
+  document.querySelectorAll("[data-quick-attendance]").forEach((button) => {
+    button.addEventListener("click", () => quickMarkAttendance(Number(button.dataset.quickAttendance)));
+  });
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
@@ -2422,6 +2425,32 @@ function bindViewActions() {
     currentUser = state.users[0];
     renderShell();
   });
+}
+
+async function quickMarkAttendance(studentId) {
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student || isParent()) return;
+  const item = {
+    studentId: Number(studentId),
+    date: new Date().toISOString().slice(0, 10),
+    status: "present",
+    topic: "Быстрая отметка",
+  };
+  if (backendEnabled) {
+    await apiRequest("create_attendance", item);
+    await refreshData();
+    return;
+  }
+  const existing = state.attendance.find((record) => Number(record.studentId) === Number(studentId) && record.date === item.date);
+  if (existing) {
+    existing.status = "present";
+    existing.topic = item.topic;
+  } else {
+    state.attendance.unshift({ ...item, id: Date.now() });
+  }
+  syncStudentSubscription(studentId);
+  saveState();
+  render();
 }
 
 async function toggleAttendance(payload) {
