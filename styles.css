@@ -2059,6 +2059,46 @@ td small {
   font-weight: 750;
 }
 
+.lesson-archive-card {
+  margin-top: 14px;
+}
+
+.lesson-archive-list {
+  display: grid;
+  gap: 10px;
+}
+
+.lesson-archive-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.lesson-archive-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.lesson-archive-row:hover {
+  border-color: rgba(29, 111, 232, 0.28);
+  box-shadow: 0 12px 28px rgba(8, 36, 77, 0.08);
+  transform: translateY(-1px);
+}
+
 .lesson-mode {
   display: grid;
   gap: 16px;
@@ -2532,6 +2572,7 @@ td small {
   }
 
   .lesson-launch-row,
+  .lesson-archive-row,
   .lesson-mode-hero,
   .section-title,
   .lesson-student-row,

@@ -27,6 +27,7 @@ const seed = {
   expenses: [],
   attendance: [],
   feedback: [],
+  lessonArchives: [],
   homework: [],
   photoReports: [],
   certificates: [],
@@ -93,6 +94,7 @@ function normalizeState(nextState) {
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
   nextState.feedback = nextState.feedback || [];
+  nextState.lessonArchives = nextState.lessonArchives || [];
   nextState.homework = nextState.homework || [];
   nextState.photoReports = nextState.photoReports || [];
   nextState.certificates = nextState.certificates || [];
@@ -221,6 +223,13 @@ function visibleAttendance() {
 function visibleFeedback() {
   const ids = visibleStudentIds();
   return state.feedback.filter((item) => ids.has(Number(item.studentId)));
+}
+
+function visibleLessonArchives() {
+  if (isAdmin()) return state.lessonArchives || [];
+  if (isParent()) return [];
+  const groups = new Set(currentUser?.groups || []);
+  return (state.lessonArchives || []).filter((item) => groups.has(item.group) || item.mentor === currentUser?.name);
 }
 
 function visibleHomework() {
@@ -1383,6 +1392,7 @@ function subscriptionBadge(sub) {
 
 function renderSchedule() {
   const lessons = visibleSchedule();
+  const archives = visibleLessonArchives();
   return `
     <div class="toolbar">
       ${isAdmin() ? `<button class="button primary" data-add-schedule type="button">+ Занятие</button>` : ""}
@@ -1420,7 +1430,31 @@ function renderSchedule() {
         </table>
       </div>
     </article>
+    <article class="card lesson-archive-card">
+      <div class="card-header">
+        <h3>Архив завершенных уроков</h3>
+        <span class="badge neutral">${archives.length} записей</span>
+      </div>
+      <div class="card-body lesson-archive-list">
+        ${archives.map((item) => lessonArchiveRow(item)).join("") || `<div class="empty">Завершите урок через пульт, и он появится в архиве.</div>`}
+      </div>
+    </article>
   `;
+}
+
+function lessonArchiveRow(item) {
+  const present = (item.attendance || []).filter((record) => record.status === "present").length;
+  const absent = (item.attendance || []).filter((record) => record.status === "absent").length;
+  return `
+    <button class="lesson-archive-row" data-open-lesson-archive="${item.id}" type="button">
+      <div>
+        <strong>${item.group} · ${item.topic}</strong>
+        <small>${formatDate(item.date)} · ${item.time || "без времени"} · ${item.mentor}</small>
+      </div>
+      <span class="badge active">${present} был</span>
+      <span class="badge ${absent ? "overdue" : "neutral"}">${absent} НБ</span>
+      <small>${(item.feedback || []).length} фидбеков</small>
+    </button>`;
 }
 
 function renderTrials() {
@@ -2325,6 +2359,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
+  document.querySelectorAll("[data-open-lesson-archive]").forEach((button) => {
+    button.addEventListener("click", () => openLessonArchiveModal(Number(button.dataset.openLessonArchive)));
+  });
   document.querySelectorAll("[data-attendance-qr]").forEach((button) => {
     button.addEventListener("click", () => openQrAttendanceModal(Number(button.dataset.attendanceQr)));
   });
@@ -2559,6 +2596,53 @@ function openStudentProfile(studentId) {
     closeModal();
     openParentReviewModal(student.id);
   });
+}
+
+function openLessonArchiveModal(archiveId) {
+  const archive = visibleLessonArchives().find((item) => Number(item.id) === Number(archiveId));
+  if (!archive) return;
+  const attendance = archive.attendance || [];
+  const feedback = archive.feedback || [];
+  const present = attendance.filter((item) => item.status === "present").length;
+  const absent = attendance.filter((item) => item.status === "absent").length;
+  openModal(
+    `Архив · ${archive.group}`,
+    `<div class="profile-modal">
+      <div class="profile-summary">
+        ${stat("Дата", formatDate(archive.date), archive.time || "без времени")}
+        ${stat("Тема", archive.topic, archive.mentor)}
+        ${stat("Посещаемость", `${present}/${attendance.length}`, `${absent} НБ`)}
+        ${stat("Фидбек", feedback.length, archive.reportTitle ? "есть фотоотчет" : "без фотоотчета")}
+      </div>
+      ${archive.goal ? `<div class="list-row"><strong>Цель урока</strong><small>${archive.goal}</small></div>` : ""}
+      <div class="module-grid profile-sections">
+        <section class="card">
+          <div class="card-header"><h3>Посещаемость</h3><span class="badge neutral">${attendance.length}</span></div>
+          <div class="card-body list">
+            ${
+              attendance
+                .map((item) => `<div class="list-row"><strong>${item.studentName}</strong><span class="badge ${item.status}">${item.status === "present" ? "Был" : "НБ"}</span></div>`)
+                .join("") || `<div class="empty">Нет отметок</div>`
+            }
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header"><h3>Фидбек урока</h3><span class="badge active">${feedback.length}</span></div>
+          <div class="card-body list">
+            ${
+              feedback
+                .map((item) => `<article class="feedback-note"><strong>${item.studentName} · ${item.skill}</strong><p>${item.text}</p></article>`)
+                .join("") || `<div class="empty">Фидбек не добавлялся</div>`
+            }
+          </div>
+        </section>
+      </div>
+      <div class="card-body list">
+        ${archive.reportTitle ? `<div class="list-row"><strong>Фотоотчет</strong><small>${archive.reportTitle}</small></div>` : ""}
+        ${archive.homeworkTitle ? `<div class="list-row"><strong>Домашка</strong><small>${archive.homeworkTitle}</small></div>` : ""}
+      </div>
+    </div>`,
+  );
 }
 
 function openModal(title, content) {
@@ -3589,6 +3673,7 @@ async function saveLessonMode(event, lesson, students) {
   const shouldHomework = form.homeworkTitle?.trim() && form.homeworkText?.trim() && homeworkAudience.length;
   const feedbackItems = buildLessonFeedbackItems(form, lesson, students, presentIds);
   const taskItems = buildAfterLessonTasks(lesson, students, form, presentIds, shouldReport, shouldHomework);
+  const archivePayload = buildLessonArchivePayload(lesson, students, form, attendanceItems, feedbackItems);
 
   if (backendEnabled) {
     for (const item of attendanceItems) await apiRequest("create_attendance", item);
@@ -3614,6 +3699,7 @@ async function saveLessonMode(event, lesson, students) {
       });
     }
     for (const task of taskItems) await apiRequest("create_task", task);
+    await apiRequest("create_lesson_archive", archivePayload);
     clearActiveLessonSession();
     closeModal();
     await refreshData();
@@ -3667,10 +3753,41 @@ async function saveLessonMode(event, lesson, students) {
       createdBy: currentUser.name,
     });
   });
+  state.lessonArchives.unshift({
+    ...archivePayload,
+    id: Date.now() + 400,
+    createdBy: currentUser.name,
+    createdAt: new Date().toISOString(),
+  });
   saveState();
   clearActiveLessonSession();
   closeModal();
   render();
+}
+
+function buildLessonArchivePayload(lesson, students, form, attendanceItems, feedbackItems) {
+  const byStudentId = new Map(students.map((student) => [Number(student.id), student]));
+  return {
+    date: form.date,
+    group: lesson.group,
+    time: lesson.time || "",
+    mentor: lesson.mentor,
+    topic: form.topic || "Урок S7 Robotics",
+    goal: form.goal || "",
+    reportTitle: form.reportTitle || "",
+    homeworkTitle: form.homeworkTitle || "",
+    attendance: attendanceItems.map((item) => ({
+      studentId: item.studentId,
+      studentName: byStudentId.get(Number(item.studentId))?.name || "Ученик",
+      status: item.status,
+    })),
+    feedback: feedbackItems.map((item) => ({
+      studentId: item.studentId,
+      studentName: byStudentId.get(Number(item.studentId))?.name || "Ученик",
+      skill: item.skill,
+      text: item.text,
+    })),
+  };
 }
 
 function buildLessonFeedbackItems(form, lesson, students, presentIds) {

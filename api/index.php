@@ -45,6 +45,7 @@ try {
         'parent_qr_attendance' => parent_qr_attendance($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
+        'create_lesson_archive' => create_lesson_archive($pdo, require_user($pdo), $input),
         'create_homework' => create_homework($pdo, require_user($pdo), $input),
         'update_homework_status' => update_homework_status($pdo, require_user($pdo), $input),
         'delete_homework' => delete_homework($pdo, require_user($pdo), $input),
@@ -148,6 +149,21 @@ function init_db(PDO $pdo): void
             text text not null,
             date text not null,
             created_by integer references users(id) on delete set null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists lesson_archives (
+            id integer primary key autoincrement,
+            date text not null,
+            group_name text not null,
+            time text not null,
+            mentor text not null,
+            topic text not null,
+            goal text,
+            attendance_json text not null default '[]',
+            feedback_json text not null default '[]',
+            report_title text,
+            homework_title text,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
         create table if not exists homework (
@@ -716,6 +732,38 @@ function create_feedback(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function create_lesson_archive(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Архив уроков доступен ментору или администратору.', 403);
+    }
+    $group = required($input, 'group');
+    $mentor = $user['role'] === 'admin' ? ($input['mentor'] ?? $user['name']) : $user['name'];
+    if ($user['role'] !== 'admin' && $mentor !== $user['name'] && !in_array($group, user_groups($user), true)) {
+        fail('Ментор может архивировать только свои группы.', 403);
+    }
+    $attendance = is_array($input['attendance'] ?? null) ? $input['attendance'] : [];
+    $feedback = is_array($input['feedback'] ?? null) ? $input['feedback'] : [];
+    $stmt = $pdo->prepare('
+        insert into lesson_archives (date, group_name, time, mentor, topic, goal, attendance_json, feedback_json, report_title, homework_title, created_by)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        required($input, 'date'),
+        $group,
+        $input['time'] ?? '',
+        $mentor,
+        required($input, 'topic'),
+        $input['goal'] ?? '',
+        json_encode($attendance, JSON_UNESCAPED_UNICODE),
+        json_encode($feedback, JSON_UNESCAPED_UNICODE),
+        $input['reportTitle'] ?? '',
+        $input['homeworkTitle'] ?? '',
+        $user['name'],
+    ]);
+    data_response($pdo, $user);
+}
+
 function create_homework(PDO $pdo, array $user, array $input): void
 {
     if ($user['role'] === 'parent') {
@@ -1208,6 +1256,7 @@ function state_for_user(PDO $pdo, array $user): array
         'expenses' => $isAdmin ? all_expenses($pdo) : [],
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
+        'lessonArchives' => $isAdmin ? all_lesson_archives($pdo) : ($isParent ? [] : mentor_lesson_archives($pdo, $user)),
         'homework' => rows_for_ids($pdo, 'homework', $ids),
         'photoReports' => rows_for_ids($pdo, 'photo_reports', $ids),
         'certificates' => rows_for_ids($pdo, 'certificates', $ids),
@@ -1356,6 +1405,27 @@ function mentor_methods(PDO $pdo, array $user): array
 function all_lesson_checks(PDO $pdo): array
 {
     return array_map('lesson_check_row', $pdo->query('select * from lesson_checks order by date desc, id desc')->fetchAll());
+}
+
+function all_lesson_archives(PDO $pdo): array
+{
+    return array_map('lesson_archive_row', $pdo->query('select * from lesson_archives order by date desc, time desc, id desc')->fetchAll());
+}
+
+function mentor_lesson_archives(PDO $pdo, array $user): array
+{
+    $groups = user_groups($user);
+    $params = [$user['name']];
+    $sql = 'select * from lesson_archives where mentor = ?';
+    if ($groups) {
+        $placeholders = implode(',', array_fill(0, count($groups), '?'));
+        $sql .= " or group_name in ($placeholders)";
+        $params = [...$params, ...$groups];
+    }
+    $sql .= ' order by date desc, time desc, id desc';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return array_map('lesson_archive_row', $stmt->fetchAll());
 }
 
 function mentor_lesson_checks(PDO $pdo, array $user): array
@@ -1616,6 +1686,25 @@ function feedback_row(array $row): array
         'skill' => $row['skill'],
         'text' => $row['text'],
         'date' => $row['date'],
+    ];
+}
+
+function lesson_archive_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'date' => $row['date'],
+        'group' => $row['group_name'],
+        'time' => $row['time'],
+        'mentor' => $row['mentor'],
+        'topic' => $row['topic'],
+        'goal' => $row['goal'] ?? '',
+        'attendance' => json_decode($row['attendance_json'] ?? '[]', true) ?: [],
+        'feedback' => json_decode($row['feedback_json'] ?? '[]', true) ?: [],
+        'reportTitle' => $row['report_title'] ?? '',
+        'homeworkTitle' => $row['homework_title'] ?? '',
+        'createdBy' => $row['created_by'],
+        'createdAt' => $row['created_at'],
     ];
 }
 
