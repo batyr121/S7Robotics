@@ -90,7 +90,7 @@ function loadState() {
 function normalizeState(nextState) {
   nextState.users = nextState.users || [];
   nextState.users = nextState.users.map((user) => ({ phone: "", ...user }));
-  nextState.students = (nextState.students || []).map((student) => ({ subscriptionNumber: 1, ...student }));
+  nextState.students = (nextState.students || []).map((student) => ({ subscriptionNumber: 1, subscriptionAmount: 0, ...student }));
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
   nextState.feedback = nextState.feedback || [];
@@ -283,6 +283,38 @@ function filteredStudents() {
 
 function formatMoney(value) {
   return new Intl.NumberFormat("ru-KZ").format(value) + " ₸";
+}
+
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function studentSubscriptionAmount(student) {
+  const saved = Number(student.subscriptionAmount || 0);
+  if (saved > 0) return saved;
+  return studentPayments(student.id)[0]?.amount || 0;
+}
+
+function studentFinanceSummary(students = visibleStudents()) {
+  const ids = new Set(students.map((student) => Number(student.id)));
+  const payments = (isAdmin() ? state.payments : visiblePayments()).filter((payment) => ids.has(Number(payment.studentId)));
+  const month = currentMonthKey();
+  const activeStudents = students.filter((student) => student.status !== "pause");
+  const expected = activeStudents.reduce((sum, student) => sum + studentSubscriptionAmount(student), 0);
+  const paidTotal = payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const monthPaid = payments
+    .filter((payment) => payment.status === "paid" && String(payment.date || "").startsWith(month))
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const control = activeStudents
+    .filter((student) => subscriptionStatus(student).needsPayment || !studentPayments(student.id).some((payment) => String(payment.date || "").startsWith(month)))
+    .reduce((sum, student) => sum + studentSubscriptionAmount(student), 0);
+  return {
+    expected,
+    paidTotal,
+    monthPaid,
+    control,
+    average: activeStudents.length ? Math.round(expected / activeStudents.length) : 0,
+  };
 }
 
 function formatDate(date) {
@@ -483,6 +515,17 @@ function groupProgram(group) {
 
 function groupCapacity(group) {
   return groupProgram(group) === "B" ? 9 : 7;
+}
+
+const weekDays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+function todayShortDay() {
+  return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][new Date().getDay()];
+}
+
+function scheduleDayOrder(day) {
+  const index = weekDays.indexOf(day);
+  return index === -1 ? 99 : index;
 }
 
 function groupOccupancy(group) {
@@ -1240,7 +1283,43 @@ function programProgress(student) {
 
 function renderStudents() {
   const students = filteredStudents();
+  const finance = studentFinanceSummary(students);
+  const groupFinance = uniqueGroups()
+    .map((group) => {
+      const groupStudents = students.filter((student) => student.group === group);
+      return { group, students: groupStudents, finance: studentFinanceSummary(groupStudents) };
+    })
+    .filter((item) => item.students.length);
   return `
+    ${
+      isAdmin()
+        ? `<div class="stats-grid finance-stats">
+            ${stat("Доход компании", formatMoney(finance.expected), "потенциал активных учеников")}
+            ${stat("Оплачено за месяц", formatMoney(finance.monthPaid), "факт текущего месяца")}
+            ${stat("К контролю", formatMoney(finance.control), "оплата или продление")}
+            ${stat("Средний чек", formatMoney(finance.average), "по активным ученикам")}
+          </div>
+          <article class="card finance-pulse-card">
+            <div class="card-header"><h3>Финансовый пульс групп</h3><span class="badge neutral">${groupFinance.length} групп</span></div>
+            <div class="card-body finance-pulse-grid">
+              ${
+                groupFinance
+                  .map(
+                    (item) => `
+                      <div class="finance-pulse-row">
+                        <div>
+                          <strong>${item.group}</strong>
+                          <small>${item.students.length} учеников · ${formatMoney(item.finance.average)} средний чек</small>
+                        </div>
+                        <span>${formatMoney(item.finance.expected)}</span>
+                      </div>`,
+                  )
+                  .join("") || `<div class="empty">Нет групп для расчета</div>`
+              }
+            </div>
+          </article>`
+        : ""
+    }
     <div class="toolbar">
       <div class="filters">
         ${isAdmin() ? `<button class="button primary" data-add-student type="button">+ Ученик</button>` : ""}
@@ -1258,6 +1337,7 @@ function renderStudents() {
               <th>Родитель</th>
               <th>Ментор</th>
               <th>Абонемент</th>
+              ${isAdmin() ? `<th>Тариф</th>` : ""}
               <th>Статус</th>
               <th>Действия</th>
             </tr>
@@ -1281,6 +1361,7 @@ function renderStudents() {
                       <small>${sub.startDate ? `оплата ${formatDate(sub.startDate)}` : "нет оплаты"}</small>
                       <small>${isAdmin() ? `оплата ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "не рассчитана"}` : "детали у админа"}</small>
                     </td>
+                    ${isAdmin() ? `<td><strong>${formatMoney(studentSubscriptionAmount(student))}</strong><small>абонемент</small></td>` : ""}
                     <td><span class="badge ${sub.expired ? "overdue" : sub.needsPayment ? "soon" : student.status}">${sub.expired ? "Нужна оплата" : sub.needsPayment ? "7-е посещение" : statusText[student.status]}</span></td>
                     <td>
                       <div class="row-actions">
@@ -1292,7 +1373,7 @@ function renderStudents() {
                   </tr>`;
                   })()}`,
               )
-              .join("") || `<tr><td colspan="7"><div class="empty">Ничего не найдено</div></td></tr>`}
+              .join("") || `<tr><td colspan="${isAdmin() ? 8 : 7}"><div class="empty">Ничего не найдено</div></td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1391,43 +1472,29 @@ function subscriptionBadge(sub) {
 }
 
 function renderSchedule() {
-  const lessons = visibleSchedule();
+  const lessons = [...visibleSchedule()].sort((a, b) => scheduleDayOrder(a.day) - scheduleDayOrder(b.day) || a.time.localeCompare(b.time));
   const archives = visibleLessonArchives();
+  const today = todayShortDay();
+  const todayLessons = lessons.filter((lesson) => lesson.day === today);
+  const nextLesson = lessons.find((lesson) => lesson.day === today) || lessons[0];
+  const totalSeats = lessons.reduce((sum, lesson) => sum + groupCapacity(lesson.group), 0);
+  const occupiedSeats = lessons.reduce((sum, lesson) => sum + Math.min(groupOccupancy(lesson.group), groupCapacity(lesson.group)), 0);
+  const fillRate = totalSeats ? Math.round((occupiedSeats / totalSeats) * 100) : 0;
   return `
     <div class="toolbar">
       ${isAdmin() ? `<button class="button primary" data-add-schedule type="button">+ Занятие</button>` : ""}
       <span class="badge neutral">${isAdmin() ? "все группы" : "мое расписание"}</span>
     </div>
-    <article class="card">
-      <div class="card-header"><h3>Расписание групп</h3><span class="badge neutral">${lessons.length} занятий</span></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>День</th><th>Время</th><th>Группа</th><th>Ментор</th><th>Действия</th></tr></thead>
-          <tbody>
-            ${
-              lessons
-                .map(
-                  (lesson) => {
-                    const timing = lessonTimingStatus(lesson);
-                    return `
-                    <tr>
-                      <td><strong>${lesson.day}</strong></td>
-                      <td>${lesson.time}<small>${timing.label}</small></td>
-                      <td>${lesson.group}</td>
-                      <td>${lesson.mentor}</td>
-                      <td>
-                        <div class="row-actions">
-                          ${!isParent() ? `<button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Начать урок</button>` : ""}
-                          ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : `<span class="badge ${timing.tone}">${timing.short}</span>`}
-                        </div>
-                      </td>
-                    </tr>`;
-                  },
-                )
-                .join("") || `<tr><td colspan="5"><div class="empty">Расписание пока не составлено</div></td></tr>`
-            }
-          </tbody>
-        </table>
+    <div class="stats-grid schedule-stats">
+      ${stat("Сегодня", todayLessons.length, `${today} · занятий`)}
+      ${stat("Неделя", lessons.length, "уроков в расписании")}
+      ${stat("Загрузка", `${fillRate}%`, "по местам групп")}
+      ${stat("Ближайший", nextLesson ? `${nextLesson.group}` : "нет", nextLesson ? `${nextLesson.day} · ${nextLesson.time}` : "добавьте занятие")}
+    </div>
+    <article class="card schedule-board-card">
+      <div class="card-header"><h3>Недельная сетка</h3><span class="badge neutral">${lessons.length} занятий</span></div>
+      <div class="card-body schedule-board">
+        ${weekDays.map((day) => scheduleDayColumn(day, lessons.filter((lesson) => lesson.day === day), today)).join("")}
       </div>
     </article>
     <article class="card lesson-archive-card">
@@ -1440,6 +1507,44 @@ function renderSchedule() {
       </div>
     </article>
   `;
+}
+
+function scheduleDayColumn(day, lessons, today) {
+  return `
+    <section class="schedule-day ${day === today ? "today" : ""}">
+      <div class="schedule-day-head">
+        <strong>${day}</strong>
+        <span>${lessons.length}</span>
+      </div>
+      <div class="schedule-day-list">
+        ${lessons.map(scheduleLessonCard).join("") || `<div class="schedule-empty">Нет уроков</div>`}
+      </div>
+    </section>`;
+}
+
+function scheduleLessonCard(lesson) {
+  const timing = lessonTimingStatus(lesson);
+  const occupied = groupOccupancy(lesson.group);
+  const capacity = groupCapacity(lesson.group);
+  return `
+    <article class="schedule-lesson-card">
+      <div class="schedule-lesson-top">
+        <strong>${lesson.time}</strong>
+        <span class="badge ${timing.tone}">${timing.short}</span>
+      </div>
+      <h4>${lesson.group}</h4>
+      <small>${lesson.mentor}</small>
+      <div class="schedule-load">
+        <span style="--load:${Math.min(100, Math.round((occupied / capacity) * 100))}%"></span>
+      </div>
+      <div class="schedule-lesson-footer">
+        <small>${occupied}/${capacity} мест</small>
+        <div class="row-actions">
+          ${!isParent() ? `<button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Старт</button>` : ""}
+          ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : ""}
+        </div>
+      </div>
+    </article>`;
 }
 
 function lessonArchiveRow(item) {
@@ -3473,6 +3578,7 @@ function openStudentModal(studentId = null) {
     modalRoot.querySelector("[name='mentor']").value = editingStudent.mentor || "";
     modalRoot.querySelector("[name='status']").value = editingStudent.status || "active";
     modalRoot.querySelector("[name='subscriptionNumber']").value = editingStudent.subscriptionNumber || 1;
+    modalRoot.querySelector("[name='subscriptionAmount']").value = studentSubscriptionAmount(editingStudent);
   }
   modalRoot.querySelector("#studentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -3483,6 +3589,7 @@ function openStudentModal(studentId = null) {
       id: editingStudent?.id,
       lessonsLeft: editingStudent?.lessonsLeft ?? 8,
       subscriptionNumber: Number(student.subscriptionNumber || editingStudent?.subscriptionNumber || 1),
+      subscriptionAmount: Number(student.subscriptionAmount || 0),
       progress: editingStudent?.progress ?? 10,
       nextPayment: student.paymentDate,
     };
@@ -3509,7 +3616,7 @@ function openStudentModal(studentId = null) {
       id: Date.now() + 1,
       studentId: state.students[0].id,
       plan: "8 занятий",
-      amount: 0,
+      amount: Number(student.subscriptionAmount || 0),
       status: "paid",
       date: student.paymentDate,
     });
@@ -3948,6 +4055,7 @@ function openPaymentModal(selectedStudentId = null) {
     });
     const student = state.students.find((item) => Number(item.id) === Number(payload.studentId));
     if (student) {
+      student.subscriptionAmount = Number(payload.amount || student.subscriptionAmount || 0);
       student.nextPayment = payload.date;
       syncStudentSubscription(student.id);
     }
