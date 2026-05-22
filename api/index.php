@@ -39,7 +39,9 @@ try {
         'create_payment' => create_payment($pdo, require_admin($pdo), $input),
         'delete_payment' => delete_payment($pdo, require_admin($pdo), $input),
         'create_expense' => create_expense($pdo, require_admin($pdo), $input),
+        'create_planned_expense' => create_planned_expense($pdo, require_admin($pdo), $input),
         'delete_expense' => delete_simple($pdo, require_admin($pdo), $input, 'expenses'),
+        'delete_planned_expense' => delete_simple($pdo, require_admin($pdo), $input, 'planned_expenses'),
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'qr_attendance_link' => qr_attendance_link($pdo, require_user($pdo), $input),
         'parent_qr_attendance' => parent_qr_attendance($pdo, require_user($pdo), $input),
@@ -128,6 +130,16 @@ function init_db(PDO $pdo): void
             amount integer not null,
             category text not null,
             date text not null,
+            note text,
+            created_by text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists planned_expenses (
+            id integer primary key autoincrement,
+            title text not null,
+            amount integer not null,
+            category text not null,
+            month text not null,
             note text,
             created_by text not null,
             created_at text not null default current_timestamp
@@ -584,6 +596,20 @@ function create_expense(PDO $pdo, array $admin, array $input): void
         (int)required($input, 'amount'),
         required($input, 'category'),
         required($input, 'date'),
+        $input['note'] ?? '',
+        $admin['name'],
+    ]);
+    data_response($pdo, $admin);
+}
+
+function create_planned_expense(PDO $pdo, array $admin, array $input): void
+{
+    $stmt = $pdo->prepare('insert into planned_expenses (title, amount, category, month, note, created_by) values (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        required($input, 'title'),
+        (int)required($input, 'amount'),
+        required($input, 'category'),
+        required($input, 'month'),
         $input['note'] ?? '',
         $admin['name'],
     ]);
@@ -1250,7 +1276,7 @@ function create_announcement(PDO $pdo, array $admin, array $input): void
 
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'trial_lessons', 'certificates'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'planned_expenses', 'trial_lessons', 'certificates'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -1273,6 +1299,7 @@ function state_for_user(PDO $pdo, array $user): array
         'students' => $students,
         'payments' => $isAdmin ? all_payments($pdo) : ($isParent ? rows_for_ids($pdo, 'payments', $ids) : []),
         'expenses' => $isAdmin ? all_expenses($pdo) : [],
+        'plannedExpenses' => $isAdmin ? all_planned_expenses($pdo) : [],
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
         'lessonArchives' => $isAdmin ? all_lesson_archives($pdo) : ($isParent ? [] : mentor_lesson_archives($pdo, $user)),
@@ -1340,6 +1367,11 @@ function all_payments(PDO $pdo): array
 function all_expenses(PDO $pdo): array
 {
     return array_map('expense_row', $pdo->query('select * from expenses order by date desc, id desc')->fetchAll());
+}
+
+function all_planned_expenses(PDO $pdo): array
+{
+    return array_map('planned_expense_row', $pdo->query('select * from planned_expenses order by month desc, id desc')->fetchAll());
 }
 
 function all_schedule(PDO $pdo): array
@@ -1681,6 +1713,19 @@ function expense_row(array $row): array
         'amount' => (int)$row['amount'],
         'category' => $row['category'],
         'date' => $row['date'],
+        'note' => $row['note'] ?? '',
+        'createdBy' => $row['created_by'],
+    ];
+}
+
+function planned_expense_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'title' => $row['title'],
+        'amount' => (int)$row['amount'],
+        'category' => $row['category'],
+        'month' => $row['month'],
         'note' => $row['note'] ?? '',
         'createdBy' => $row['created_by'],
     ];

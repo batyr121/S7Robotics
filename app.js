@@ -25,6 +25,7 @@ const seed = {
   students: [],
   payments: [],
   expenses: [],
+  plannedExpenses: [],
   attendance: [],
   feedback: [],
   lessonArchives: [],
@@ -93,6 +94,7 @@ function normalizeState(nextState) {
   nextState.students = (nextState.students || []).map((student) => ({ subscriptionNumber: 1, subscriptionAmount: 0, ...student }));
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
+  nextState.plannedExpenses = nextState.plannedExpenses || [];
   nextState.feedback = nextState.feedback || [];
   nextState.lessonArchives = nextState.lessonArchives || [];
   nextState.homework = nextState.homework || [];
@@ -314,6 +316,27 @@ function studentFinanceSummary(students = visibleStudents()) {
     monthPaid,
     control,
     average: activeStudents.length ? Math.round(expected / activeStudents.length) : 0,
+  };
+}
+
+function monthLabel(monthKey = currentMonthKey()) {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+
+function monthExpenses() {
+  const month = currentMonthKey();
+  const actual = (state.expenses || []).filter((expense) => String(expense.date || "").startsWith(month));
+  const planned = (state.plannedExpenses || []).filter((expense) => expense.month === month);
+  const actualTotal = actual.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const plannedTotal = planned.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  return {
+    actual,
+    planned,
+    actualTotal,
+    plannedTotal,
+    reserve: Math.max(0, plannedTotal - actualTotal),
+    overrun: Math.max(0, actualTotal - plannedTotal),
   };
 }
 
@@ -1367,6 +1390,11 @@ function renderStudents() {
                       <div class="row-actions">
                         <button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button>
                         ${isAdmin() ? `<button class="button secondary compact" data-edit-student="${student.id}" type="button">Редактировать</button>` : ""}
+                        ${
+                          isAdmin()
+                            ? `<button class="button ${student.status === "pause" ? "primary" : "ghost"} compact" data-toggle-freeze-student="${student.id}" type="button">${student.status === "pause" ? "Разморозить" : "Заморозка"}</button>`
+                            : ""
+                        }
                         ${isAdmin() ? `<button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>` : ""}
                       </div>
                     </td>
@@ -1658,7 +1686,10 @@ function renderPayments() {
   const billedTotal = state.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const paidTotal = state.payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + payment.amount, 0);
   const expenses = (state.expenses || []).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const monthCash = monthExpenses();
+  const monthIncome = studentFinanceSummary(state.students).monthPaid;
   const net = paidTotal - expenses;
+  const monthNet = monthIncome - monthCash.actualTotal;
   return `
     <div class="stats-grid">
       ${stat("Оплачено", formatMoney(paidTotal), "фактический доход")}
@@ -1666,6 +1697,34 @@ function renderPayments() {
       ${stat("Расход", formatMoney(expenses), "траты центра")}
       ${stat("Остаток", formatMoney(net), "оплаты минус расходы")}
     </div>
+    <article class="card cashbox-card">
+      <div class="card-header">
+        <h3>Мини-касса · ${monthLabel()}</h3>
+        <button class="button primary" data-add-planned-expense type="button">+ Плановая трата</button>
+      </div>
+      <div class="card-body">
+        <div class="cashbox-grid">
+          ${stat("Доход месяца", formatMoney(monthIncome), "оплаты текущего месяца")}
+          ${stat("План расходов", formatMoney(monthCash.plannedTotal), "бюджет месяца")}
+          ${stat("Факт расходов", formatMoney(monthCash.actualTotal), monthCash.overrun ? `перерасход ${formatMoney(monthCash.overrun)}` : `резерв ${formatMoney(monthCash.reserve)}`)}
+          ${stat("Прибыль месяца", formatMoney(monthNet), "доход минус факт")}
+        </div>
+        <div class="cashbox-columns">
+          <section>
+            <div class="section-title"><strong>Плановые траты</strong><small>${monthCash.planned.length} записей</small></div>
+            <div class="list compact-list">
+              ${monthCash.planned.map((expense) => plannedExpenseRow(expense)).join("") || `<div class="empty">Плановых трат на месяц пока нет</div>`}
+            </div>
+          </section>
+          <section>
+            <div class="section-title"><strong>Фактические траты</strong><small>${monthCash.actual.length} записей</small></div>
+            <div class="list compact-list">
+              ${monthCash.actual.map((expense) => expenseRow(expense)).join("") || `<div class="empty">Фактических расходов в этом месяце нет</div>`}
+            </div>
+          </section>
+        </div>
+      </div>
+    </article>
     <div class="module-grid">
       <article class="card">
         <div class="card-header">
@@ -1721,6 +1780,21 @@ function expenseRow(expense) {
       <div>
         <strong>${formatMoney(expense.amount)}</strong>
         <button class="button danger compact" data-delete-expense="${expense.id}" type="button">Удалить</button>
+      </div>
+    </div>`;
+}
+
+function plannedExpenseRow(expense) {
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${expense.title}</strong>
+        <small>${expenseCategoryLabel(expense.category)} · ${monthLabel(expense.month)}${expense.createdBy ? ` · ${expense.createdBy}` : ""}</small>
+        ${expense.note ? `<small>${expense.note}</small>` : ""}
+      </div>
+      <div>
+        <strong>${formatMoney(expense.amount)}</strong>
+        <button class="button danger compact" data-delete-planned-expense="${expense.id}" type="button">Удалить</button>
       </div>
     </div>`;
 }
@@ -2437,6 +2511,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-edit-student]").forEach((button) => {
     button.addEventListener("click", () => openStudentModal(Number(button.dataset.editStudent)));
   });
+  document.querySelectorAll("[data-toggle-freeze-student]").forEach((button) => {
+    button.addEventListener("click", () => toggleStudentFreeze(Number(button.dataset.toggleFreezeStudent)));
+  });
   document.querySelectorAll("[data-delete-student]").forEach((button) => {
     button.addEventListener("click", () => deleteStudent(Number(button.dataset.deleteStudent)));
   });
@@ -2451,6 +2528,9 @@ function bindViewActions() {
   });
   document.querySelectorAll("[data-delete-expense]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("expense", Number(button.dataset.deleteExpense)));
+  });
+  document.querySelectorAll("[data-delete-planned-expense]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("plannedExpense", Number(button.dataset.deletePlannedExpense)));
   });
   document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
@@ -2547,6 +2627,7 @@ function bindViewActions() {
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-expense]")?.addEventListener("click", openExpenseModal);
+  document.querySelector("[data-add-planned-expense]")?.addEventListener("click", openPlannedExpenseModal);
   document.querySelector("[data-add-feedback]")?.addEventListener("click", () => openFeedbackModal());
   document.querySelector("[data-add-homework]")?.addEventListener("click", () => openHomeworkModal());
   document.querySelector("[data-add-photo-report]")?.addEventListener("click", () => openPhotoReportModal());
@@ -3314,6 +3395,7 @@ async function deleteRecord(type, id) {
     method: ["delete_method", "methods"],
     announcement: ["delete_announcement", "announcements"],
     expense: ["delete_expense", "expenses"],
+    plannedExpense: ["delete_planned_expense", "plannedExpenses"],
     trial: ["delete_trial", "trialLessons"],
     certificate: ["delete_certificate", "certificates"],
   };
@@ -3337,6 +3419,28 @@ async function updateTaskStatus(taskId, status) {
   const task = state.tasks.find((item) => Number(item.id) === Number(taskId));
   if (!task) return;
   task.status = status;
+  saveState();
+  render();
+}
+
+async function toggleStudentFreeze(studentId) {
+  if (!isAdmin()) return;
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const frozen = student.status === "pause";
+  if (!frozen && !confirm(`Заморозить ученика ${student.name}? Он не будет считаться в активной загрузке и доходе.`)) return;
+  const payload = {
+    ...student,
+    group: student.group,
+    paymentDate: student.nextPayment || new Date().toISOString().slice(0, 10),
+    status: frozen ? "active" : "pause",
+  };
+  if (backendEnabled) {
+    await apiRequest("update_student", payload);
+    await refreshData();
+    return;
+  }
+  student.status = payload.status;
   saveState();
   render();
 }
@@ -4111,6 +4215,52 @@ function openExpenseModal() {
   });
 }
 
+function openPlannedExpenseModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Плановая трата",
+    `<form class="modal-form" id="plannedExpenseForm">
+      <label>Название<input name="title" required placeholder="Например: аренда кабинета" /></label>
+      <label>Сумма<input name="amount" type="number" min="0" required placeholder="120000" /></label>
+      <label>Месяц<input name="month" type="month" required value="${currentMonthKey()}" /></label>
+      <label>Категория
+        <select name="category">
+          <option value="rent">Аренда</option>
+          <option value="salary">Зарплата</option>
+          <option value="equipment">Оборудование</option>
+          <option value="marketing">Маркетинг</option>
+          <option value="utilities">Коммунальные</option>
+          <option value="other">Другое</option>
+        </select>
+      </label>
+      <label style="grid-column:1/-1">Пояснение<textarea name="note" placeholder="Что планируем оплатить и почему"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#plannedExpenseForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const expense = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const payload = {
+      ...expense,
+      amount: Number(expense.amount),
+    };
+    if (backendEnabled) {
+      await apiRequest("create_planned_expense", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.plannedExpenses.unshift({
+      ...payload,
+      id: Date.now(),
+      createdBy: currentUser.name,
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
 function openFeedbackModal(selectedStudentId = null) {
   openModal(
     "Фидбек ученику",
@@ -4469,6 +4619,18 @@ function exportPaymentsCsv() {
       payment.amount,
       payment.date,
       statusText[payment.status],
+    ]);
+  });
+  rows.push([]);
+  rows.push(["Плановая трата", "Категория", "Сумма", "Месяц", "Пояснение", "Добавил"]);
+  (state.plannedExpenses || []).forEach((expense) => {
+    rows.push([
+      expense.title,
+      expenseCategoryLabel(expense.category),
+      expense.amount,
+      expense.month,
+      expense.note || "",
+      expense.createdBy || "",
     ]);
   });
   rows.push([]);

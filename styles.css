@@ -1339,6 +1339,37 @@ select {
   white-space: nowrap;
 }
 
+.cashbox-card {
+  margin: 14px 0;
+}
+
+.cashbox-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cashbox-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.cashbox-columns section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(247, 250, 255, 0.74);
+}
+
+.compact-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .button {
   position: relative;
   overflow: hidden;
@@ -2696,6 +2727,8 @@ td small {
 
   .module-grid,
   .kanban,
+  .cashbox-grid,
+  .cashbox-columns,
   .profile-sections,
   .quality-layout,
   .parent-overview {
@@ -2931,6 +2964,8 @@ td small {
   .task-board,
   .method-grid,
   .parent-grid,
+  .cashbox-grid,
+  .cashbox-columns,
   .finance-pulse-grid,
   .parent-overview,
   .weekly-missions,
