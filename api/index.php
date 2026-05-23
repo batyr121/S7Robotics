@@ -40,6 +40,7 @@ try {
         'delete_payment' => delete_payment($pdo, require_admin($pdo), $input),
         'create_expense' => create_expense($pdo, require_admin($pdo), $input),
         'create_planned_expense' => create_planned_expense($pdo, require_admin($pdo), $input),
+        'update_planned_expense_payment' => update_planned_expense_payment($pdo, require_admin($pdo), $input),
         'delete_expense' => delete_simple($pdo, require_admin($pdo), $input, 'expenses'),
         'delete_planned_expense' => delete_simple($pdo, require_admin($pdo), $input, 'planned_expenses'),
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
@@ -140,6 +141,8 @@ function init_db(PDO $pdo): void
             amount integer not null,
             category text not null,
             month text not null,
+            paid_amount integer not null default 0,
+            paid_at text,
             note text,
             created_by text not null,
             created_at text not null default current_timestamp
@@ -311,6 +314,7 @@ function init_db(PDO $pdo): void
     migrate_users_phone($pdo);
     migrate_students_subscription_number($pdo);
     migrate_students_subscription_amount($pdo);
+    migrate_planned_expenses_payment($pdo);
 }
 
 function migrate_users_role_check(PDO $pdo): void
@@ -374,6 +378,18 @@ function migrate_students_subscription_amount(PDO $pdo): void
         }
     }
     $pdo->exec('alter table students add column subscription_amount integer not null default 0');
+}
+
+function migrate_planned_expenses_payment(PDO $pdo): void
+{
+    $columns = $pdo->query('pragma table_info(planned_expenses)')->fetchAll();
+    $names = array_map(fn($column) => $column['name'] ?? '', $columns);
+    if (!in_array('paid_amount', $names, true)) {
+        $pdo->exec('alter table planned_expenses add column paid_amount integer not null default 0');
+    }
+    if (!in_array('paid_at', $names, true)) {
+        $pdo->exec('alter table planned_expenses add column paid_at text');
+    }
 }
 
 function login(PDO $pdo, array $input): void
@@ -604,15 +620,33 @@ function create_expense(PDO $pdo, array $admin, array $input): void
 
 function create_planned_expense(PDO $pdo, array $admin, array $input): void
 {
-    $stmt = $pdo->prepare('insert into planned_expenses (title, amount, category, month, note, created_by) values (?, ?, ?, ?, ?, ?)');
+    $paidAmount = max(0, (int)($input['paidAmount'] ?? 0));
+    $amount = (int)required($input, 'amount');
+    $stmt = $pdo->prepare('insert into planned_expenses (title, amount, category, month, paid_amount, paid_at, note, created_by) values (?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([
         required($input, 'title'),
-        (int)required($input, 'amount'),
+        $amount,
         required($input, 'category'),
         required($input, 'month'),
+        min($paidAmount, $amount),
+        $paidAmount > 0 ? ($input['paidAt'] ?? date('Y-m-d')) : null,
         $input['note'] ?? '',
         $admin['name'],
     ]);
+    data_response($pdo, $admin);
+}
+
+function update_planned_expense_payment(PDO $pdo, array $admin, array $input): void
+{
+    $id = (int)required($input, 'id');
+    $stmt = $pdo->prepare('select amount from planned_expenses where id = ?');
+    $stmt->execute([$id]);
+    $amountValue = $stmt->fetchColumn();
+    if ($amountValue === false) fail('Плановая трата не найдена.', 404);
+    $amount = (int)$amountValue;
+    $paidAmount = min($amount, max(0, (int)required($input, 'paidAmount')));
+    $stmt = $pdo->prepare('update planned_expenses set paid_amount = ?, paid_at = ? where id = ?');
+    $stmt->execute([$paidAmount, $paidAmount > 0 ? ($input['paidAt'] ?? date('Y-m-d')) : null, $id]);
     data_response($pdo, $admin);
 }
 
@@ -1726,6 +1760,8 @@ function planned_expense_row(array $row): array
         'amount' => (int)$row['amount'],
         'category' => $row['category'],
         'month' => $row['month'],
+        'paidAmount' => (int)($row['paid_amount'] ?? 0),
+        'paidAt' => $row['paid_at'] ?? '',
         'note' => $row['note'] ?? '',
         'createdBy' => $row['created_by'],
     ];

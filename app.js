@@ -94,7 +94,7 @@ function normalizeState(nextState) {
   nextState.students = (nextState.students || []).map((student) => ({ subscriptionNumber: 1, subscriptionAmount: 0, ...student }));
   nextState.payments = nextState.payments || [];
   nextState.expenses = nextState.expenses || [];
-  nextState.plannedExpenses = nextState.plannedExpenses || [];
+  nextState.plannedExpenses = (nextState.plannedExpenses || []).map((expense) => ({ paidAmount: 0, paidAt: "", ...expense }));
   nextState.feedback = nextState.feedback || [];
   nextState.lessonArchives = nextState.lessonArchives || [];
   nextState.homework = nextState.homework || [];
@@ -330,11 +330,14 @@ function monthExpenses() {
   const planned = (state.plannedExpenses || []).filter((expense) => expense.month === month);
   const actualTotal = actual.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
   const plannedTotal = planned.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const plannedPaid = planned.reduce((sum, expense) => sum + Number(expense.paidAmount || 0), 0);
   return {
     actual,
     planned,
     actualTotal,
     plannedTotal,
+    plannedPaid,
+    plannedLeft: Math.max(0, plannedTotal - plannedPaid),
     reserve: Math.max(0, plannedTotal - actualTotal),
     overrun: Math.max(0, actualTotal - plannedTotal),
   };
@@ -1552,8 +1555,10 @@ function scheduleDayColumn(day, lessons, today) {
 
 function scheduleLessonCard(lesson) {
   const timing = lessonTimingStatus(lesson);
-  const occupied = groupOccupancy(lesson.group);
+  const assignedStudents = state.students.filter((student) => student.group === lesson.group && student.status !== "pause");
+  const occupied = assignedStudents.length;
   const capacity = groupCapacity(lesson.group);
+  const program = groupProgram(lesson.group);
   return `
     <article class="schedule-lesson-card">
       <div class="schedule-lesson-top">
@@ -1561,18 +1566,35 @@ function scheduleLessonCard(lesson) {
         <span class="badge ${timing.tone}">${timing.short}</span>
       </div>
       <h4>${lesson.group}</h4>
-      <small>${lesson.mentor}</small>
+      <small>${program === "B" ? "Программа B · 9 мест" : "Программа A · 7 мест"} · ${lesson.mentor}</small>
       <div class="schedule-load">
         <span style="--load:${Math.min(100, Math.round((occupied / capacity) * 100))}%"></span>
+      </div>
+      <div class="schedule-slots">
+        ${Array.from({ length: capacity }, (_, index) => {
+          const student = assignedStudents[index];
+          return `<span class="${student ? "filled" : ""}" title="${student?.name || "Свободное место"}">${student ? initials(student.name) : index + 1}</span>`;
+        }).join("")}
       </div>
       <div class="schedule-lesson-footer">
         <small>${occupied}/${capacity} мест</small>
         <div class="row-actions">
+          ${isAdmin() ? `<button class="button secondary compact" data-manage-schedule-slots="${lesson.id}" type="button">Слоты</button>` : ""}
           ${!isParent() ? `<button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Старт</button>` : ""}
           ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : ""}
         </div>
       </div>
     </article>`;
+}
+
+function initials(name = "") {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 }
 
 function lessonArchiveRow(item) {
@@ -1706,6 +1728,7 @@ function renderPayments() {
         <div class="cashbox-grid">
           ${stat("Доход месяца", formatMoney(monthIncome), "оплаты текущего месяца")}
           ${stat("План расходов", formatMoney(monthCash.plannedTotal), "бюджет месяца")}
+          ${stat("Погашено плана", formatMoney(monthCash.plannedPaid), `${formatMoney(monthCash.plannedLeft)} осталось`)}
           ${stat("Факт расходов", formatMoney(monthCash.actualTotal), monthCash.overrun ? `перерасход ${formatMoney(monthCash.overrun)}` : `резерв ${formatMoney(monthCash.reserve)}`)}
           ${stat("Прибыль месяца", formatMoney(monthNet), "доход минус факт")}
         </div>
@@ -1785,15 +1808,22 @@ function expenseRow(expense) {
 }
 
 function plannedExpenseRow(expense) {
+  const paid = Number(expense.paidAmount || 0);
+  const amount = Number(expense.amount || 0);
+  const percent = amount ? Math.min(100, Math.round((paid / amount) * 100)) : 0;
+  const done = paid >= amount && amount > 0;
   return `
     <div class="list-row">
       <div>
         <strong>${expense.title}</strong>
-        <small>${expenseCategoryLabel(expense.category)} · ${monthLabel(expense.month)}${expense.createdBy ? ` · ${expense.createdBy}` : ""}</small>
+        <small>${expenseCategoryLabel(expense.category)} · ${monthLabel(expense.month)} · ${done ? "погашено" : `${formatMoney(amount - paid)} осталось`}</small>
+        <div class="mini-progress"><span style="width:${percent}%"></span></div>
         ${expense.note ? `<small>${expense.note}</small>` : ""}
       </div>
       <div>
         <strong>${formatMoney(expense.amount)}</strong>
+        <span class="badge ${done ? "paid" : paid ? "soon" : "neutral"}">${formatMoney(paid)}</span>
+        <button class="button secondary compact" data-pay-planned-expense="${expense.id}" type="button">Погасить</button>
         <button class="button danger compact" data-delete-planned-expense="${expense.id}" type="button">Удалить</button>
       </div>
     </div>`;
@@ -2529,6 +2559,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-expense]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("expense", Number(button.dataset.deleteExpense)));
   });
+  document.querySelectorAll("[data-pay-planned-expense]").forEach((button) => {
+    button.addEventListener("click", () => openPlannedExpensePaymentModal(Number(button.dataset.payPlannedExpense)));
+  });
   document.querySelectorAll("[data-delete-planned-expense]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("plannedExpense", Number(button.dataset.deletePlannedExpense)));
   });
@@ -2573,6 +2606,9 @@ function bindViewActions() {
   });
   document.querySelectorAll("[data-delete-schedule]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("schedule", Number(button.dataset.deleteSchedule)));
+  });
+  document.querySelectorAll("[data-manage-schedule-slots]").forEach((button) => {
+    button.addEventListener("click", () => openScheduleSlotsModal(Number(button.dataset.manageScheduleSlots)));
   });
   document.querySelectorAll("[data-start-lesson]").forEach((button) => {
     button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.startLesson)));
@@ -3255,6 +3291,71 @@ function openScheduleModal() {
   });
 }
 
+function openScheduleSlotsModal(lessonId) {
+  if (!isAdmin()) return;
+  const lesson = state.schedule.find((item) => Number(item.id) === Number(lessonId));
+  if (!lesson) return;
+  const program = groupProgram(lesson.group);
+  const capacity = groupCapacity(lesson.group);
+  const assigned = state.students.filter((student) => student.group === lesson.group && student.status !== "pause");
+  const assignedIds = new Set(assigned.map((student) => Number(student.id)));
+  const candidates = state.students
+    .filter((student) => student.status !== "pause" && !assignedIds.has(Number(student.id)) && programTrack(student) === program)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  openModal(
+    `Слоты · ${lesson.group}`,
+    `<div class="slot-manager">
+      <div class="slot-summary">
+        ${stat("Программа", program === "B" ? "B" : "A", `${capacity} мест`)}
+        ${stat("Занято", `${assigned.length}/${capacity}`, assigned.length >= capacity ? "группа заполнена" : `${capacity - assigned.length} свободно`)}
+        ${stat("Ментор", lesson.mentor, `${lesson.day} · ${lesson.time}`)}
+      </div>
+      <div class="slot-layout">
+        <section class="slot-bank">
+          <div class="section-title"><strong>Ученики слева</strong><small>подходят по программе ${program}</small></div>
+          <div class="slot-list">
+            ${
+              candidates
+                .map(
+                  (student) => `
+                    <button class="slot-student" data-assign-student="${student.id}" ${assigned.length >= capacity ? "disabled" : ""} type="button">
+                      <span>${initials(student.name)}</span>
+                      <strong>${student.name}</strong>
+                      <small>${student.group} · ${studentSubscriptionAmount(student) ? formatMoney(studentSubscriptionAmount(student)) : "тариф не указан"}</small>
+                    </button>`,
+                )
+                .join("") || `<div class="empty">Нет свободных учеников этой программы</div>`
+            }
+          </div>
+        </section>
+        <section class="slot-board">
+          <div class="section-title"><strong>Слоты группы</strong><small>${program === "B" ? "9 мест" : "7 мест"}</small></div>
+          <div class="slot-grid">
+            ${Array.from({ length: capacity }, (_, index) => {
+              const student = assigned[index];
+              return student
+                ? `<div class="slot-seat filled"><span>${index + 1}</span><strong>${student.name}</strong><small>${student.parent}</small><button class="button ghost compact" data-remove-slot-student="${student.id}" type="button">Убрать</button></div>`
+                : `<div class="slot-seat"><span>${index + 1}</span><strong>Свободно</strong><small>можно добавить ученика</small></div>`;
+            }).join("")}
+          </div>
+        </section>
+      </div>
+    </div>`,
+  );
+  modalRoot.querySelectorAll("[data-assign-student]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await updateStudentGroup(Number(button.dataset.assignStudent), lesson.group);
+      openScheduleSlotsModal(lessonId);
+    });
+  });
+  modalRoot.querySelectorAll("[data-remove-slot-student]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await updateStudentGroup(Number(button.dataset.removeSlotStudent), `${program}-резерв`);
+      openScheduleSlotsModal(lessonId);
+    });
+  });
+}
+
 function openTrialModal() {
   if (!isAdmin()) return;
   const defaultSlot = findTrialSlot("A");
@@ -3406,6 +3507,24 @@ async function deleteRecord(type, id) {
     return;
   }
   state[key] = state[key].filter((item) => Number(item.id) !== Number(id));
+  saveState();
+  render();
+}
+
+async function updateStudentGroup(studentId, group) {
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const payload = {
+    ...student,
+    group,
+    paymentDate: student.nextPayment || new Date().toISOString().slice(0, 10),
+  };
+  if (backendEnabled) {
+    await apiRequest("update_student", payload);
+    await refreshData();
+    return;
+  }
+  student.group = group;
   saveState();
   render();
 }
@@ -4223,6 +4342,7 @@ function openPlannedExpenseModal() {
       <label>Название<input name="title" required placeholder="Например: аренда кабинета" /></label>
       <label>Сумма<input name="amount" type="number" min="0" required placeholder="120000" /></label>
       <label>Месяц<input name="month" type="month" required value="${currentMonthKey()}" /></label>
+      <label>Уже погашено<input name="paidAmount" type="number" min="0" value="0" /></label>
       <label>Категория
         <select name="category">
           <option value="rent">Аренда</option>
@@ -4243,6 +4363,7 @@ function openPlannedExpenseModal() {
     const payload = {
       ...expense,
       amount: Number(expense.amount),
+      paidAmount: Number(expense.paidAmount || 0),
     };
     if (backendEnabled) {
       await apiRequest("create_planned_expense", payload);
@@ -4255,6 +4376,42 @@ function openPlannedExpenseModal() {
       id: Date.now(),
       createdBy: currentUser.name,
     });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openPlannedExpensePaymentModal(expenseId) {
+  if (!isAdmin()) return;
+  const expense = (state.plannedExpenses || []).find((item) => Number(item.id) === Number(expenseId));
+  if (!expense) return;
+  openModal(
+    `Погашение · ${expense.title}`,
+    `<form class="modal-form" id="plannedExpensePaymentForm">
+      <label>Запланировано<input value="${formatMoney(expense.amount)}" readonly /></label>
+      <label>Погашено<input name="paidAmount" type="number" min="0" max="${expense.amount}" required value="${expense.amount}" /></label>
+      <label>Дата погашения<input name="paidAt" type="date" value="${expense.paidAt || new Date().toISOString().slice(0, 10)}" /></label>
+      <div class="form-alert">Можно указать частичное погашение, CRM посчитает остаток автоматически.</div>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#plannedExpensePaymentForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const payload = {
+      id: expense.id,
+      paidAmount: Number(form.paidAmount || 0),
+      paidAt: form.paidAt,
+    };
+    if (backendEnabled) {
+      await apiRequest("update_planned_expense_payment", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    expense.paidAmount = Math.min(Number(expense.amount || 0), payload.paidAmount);
+    expense.paidAt = expense.paidAmount > 0 ? payload.paidAt : "";
     saveState();
     closeModal();
     render();
@@ -4622,12 +4779,14 @@ function exportPaymentsCsv() {
     ]);
   });
   rows.push([]);
-  rows.push(["Плановая трата", "Категория", "Сумма", "Месяц", "Пояснение", "Добавил"]);
+  rows.push(["Плановая трата", "Категория", "Сумма", "Погашено", "Осталось", "Месяц", "Пояснение", "Добавил"]);
   (state.plannedExpenses || []).forEach((expense) => {
     rows.push([
       expense.title,
       expenseCategoryLabel(expense.category),
       expense.amount,
+      expense.paidAmount || 0,
+      Math.max(0, Number(expense.amount || 0) - Number(expense.paidAmount || 0)),
       expense.month,
       expense.note || "",
       expense.createdBy || "",
