@@ -906,6 +906,14 @@ function renderDashboard() {
 
   return `
     ${dashboardLanding(students.length, active, present)}
+    ${
+      isAdmin()
+        ? `<div class="toolbar">
+            <button class="button primary" data-open-doc-report type="button">Сформировать DOC отчет</button>
+            <span class="badge neutral">ученики · посещения · расписание · финансы</span>
+          </div>`
+        : ""
+    }
     ${!isParent() ? lessonLaunchPanel() : ""}
     <div class="stats-grid">
       ${stat("Ученики", students.length, isAdmin() ? "все группы" : "мои группы")}
@@ -2694,6 +2702,7 @@ function bindViewActions() {
     button.addEventListener("click", () => resetMentorXp(button.dataset.resetXp));
   });
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
+  document.querySelector("[data-open-doc-report]")?.addEventListener("click", openDocReportModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-expense]")?.addEventListener("click", openExpenseModal);
   document.querySelector("[data-add-planned-expense]")?.addEventListener("click", openPlannedExpenseModal);
@@ -4342,6 +4351,44 @@ function openPaymentModal(selectedStudentId = null) {
   });
 }
 
+function openDocReportModal() {
+  if (!isAdmin()) return;
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  openModal(
+    "DOC отчет",
+    `<form class="modal-form" id="docReportForm">
+      <label>Тип отчета
+        <select name="type">
+          <option value="full">Полный отчет</option>
+          <option value="students">Ученики</option>
+          <option value="attendance">Посещения</option>
+          <option value="schedule">Расписание</option>
+          <option value="finance">Финансы</option>
+        </select>
+      </label>
+      <label>Группа
+        <select name="group">
+          <option value="all">Все группы</option>
+          ${uniqueGroups().map((group) => `<option value="${group}">${group}</option>`).join("")}
+        </select>
+      </label>
+      <label>С даты<input name="from" type="date" value="${monthStart}" /></label>
+      <label>По дату<input name="to" type="date" value="${monthEnd}" /></label>
+      <label style="grid-column:1/-1">Комментарий<textarea name="note" placeholder="Например: ежемесячный отчет для директора"></textarea></label>
+      <div class="form-alert">Файл скачивается как .doc и открывается в Microsoft Word, Pages или Google Docs.</div>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Скачать DOC</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#docReportForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const options = Object.fromEntries(new FormData(event.currentTarget).entries());
+    downloadDocReport(options);
+    closeModal();
+  });
+}
+
 function openExpenseModal() {
   if (!isAdmin()) return;
   openModal(
@@ -4861,9 +4908,189 @@ function exportPaymentsCsv() {
   downloadCsv("s7-finance.csv", rows);
 }
 
+function downloadDocReport(options) {
+  const html = buildDocReport(options);
+  const typeLabel = {
+    full: "full",
+    students: "students",
+    attendance: "attendance",
+    schedule: "schedule",
+    finance: "finance",
+  }[options.type] || "report";
+  downloadBlob(`s7-${typeLabel}-${new Date().toISOString().slice(0, 10)}.doc`, html, "application/msword;charset=utf-8");
+}
+
+function buildDocReport(options) {
+  const from = options.from || "";
+  const to = options.to || "";
+  const group = options.group || "all";
+  const type = options.type || "full";
+  const students = state.students.filter((student) => group === "all" || student.group === group);
+  const studentIds = new Set(students.map((student) => Number(student.id)));
+  const attendance = (state.attendance || [])
+    .filter((item) => studentIds.has(Number(item.studentId)))
+    .filter((item) => inDateRange(item.date, from, to))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const schedule = (state.schedule || [])
+    .filter((lesson) => group === "all" || lesson.group === group)
+    .sort((a, b) => scheduleDayOrder(a.day) - scheduleDayOrder(b.day) || a.time.localeCompare(b.time));
+  const payments = (state.payments || []).filter((payment) => studentIds.has(Number(payment.studentId))).filter((payment) => inDateRange(payment.date, from, to));
+  const expenses = (state.expenses || []).filter((expense) => inDateRange(expense.date, from, to));
+  const planned = (state.plannedExpenses || []).filter((expense) => (!from || expense.month >= from.slice(0, 7)) && (!to || expense.month <= to.slice(0, 7)));
+  const paidTotal = payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const plannedTotal = planned.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const plannedPaid = planned.reduce((sum, expense) => sum + Number(expense.paidAmount || 0), 0);
+  const sections = [];
+  const include = (name) => type === "full" || type === name;
+
+  sections.push(`
+    <section>
+      <h2>Сводка</h2>
+      <table>
+        <tr><th>Период</th><td>${escapeHtml(from || "без начала")} - ${escapeHtml(to || "без конца")}</td></tr>
+        <tr><th>Группа</th><td>${escapeHtml(group === "all" ? "Все группы" : group)}</td></tr>
+        <tr><th>Ученики</th><td>${students.length}</td></tr>
+        <tr><th>Посещений</th><td>${attendance.filter((item) => item.status === "present").length}</td></tr>
+        <tr><th>Оплачено</th><td>${formatMoney(paidTotal)}</td></tr>
+        <tr><th>Расходы</th><td>${formatMoney(expenseTotal)}</td></tr>
+      </table>
+      ${options.note ? `<p><strong>Комментарий:</strong> ${escapeHtml(options.note)}</p>` : ""}
+    </section>`);
+
+  if (include("students")) {
+    sections.push(reportTable("Ученики", ["ФИО", "Группа", "Программа", "Родитель", "Телефон", "Ментор", "Абонемент", "Тариф", "Статус"], students.map((student) => {
+      const sub = subscriptionStatus(student);
+      return [
+        student.name,
+        student.group,
+        programProgress(student).title,
+        student.parent,
+        student.phone,
+        student.mentor,
+        `#${sub.currentSubscriptionNumber} · ${sub.visitLabel} · ${sub.remaining} осталось`,
+        formatMoney(studentSubscriptionAmount(student)),
+        statusText[student.status] || student.status,
+      ];
+    })));
+  }
+
+  if (include("attendance")) {
+    sections.push(reportTable("Посещения", ["Дата", "Ученик", "Группа", "Статус", "Тема"], attendance.map((item) => {
+      const student = byId(item.studentId);
+      return [item.date, student?.name || "Удаленный ученик", student?.group || "", statusText[item.status] || item.status, item.topic || ""];
+    })));
+  }
+
+  if (include("schedule")) {
+    sections.push(reportTable("Расписание", ["День", "Время", "Группа", "Ментор", "Мест", "Занято"], schedule.map((lesson) => [
+      lesson.day,
+      lesson.time,
+      lesson.group,
+      lesson.mentor,
+      scheduleCapacity(lesson),
+      groupOccupancy(lesson.group),
+    ])));
+  }
+
+  if (include("finance")) {
+    sections.push(`
+      <section>
+        <h2>Финансы</h2>
+        <table>
+          <tr><th>Оплачено за период</th><td>${formatMoney(paidTotal)}</td></tr>
+          <tr><th>Фактические расходы</th><td>${formatMoney(expenseTotal)}</td></tr>
+          <tr><th>Прибыль периода</th><td>${formatMoney(paidTotal - expenseTotal)}</td></tr>
+          <tr><th>План расходов</th><td>${formatMoney(plannedTotal)}</td></tr>
+          <tr><th>Погашено плана</th><td>${formatMoney(plannedPaid)}</td></tr>
+        </table>
+      </section>`);
+    sections.push(reportTable("Оплаты", ["Дата", "Ученик", "Группа", "Абонемент", "Сумма", "Статус"], payments.map((payment) => {
+      const student = byId(payment.studentId);
+      return [payment.date, student?.name || "", student?.group || "", payment.plan, formatMoney(payment.amount), statusText[payment.status] || payment.status];
+    })));
+    sections.push(reportTable("Плановые траты", ["Месяц", "Название", "Категория", "Сумма", "Погашено", "Осталось"], planned.map((expense) => [
+      expense.month,
+      expense.title,
+      expenseCategoryLabel(expense.category),
+      formatMoney(expense.amount),
+      formatMoney(expense.paidAmount || 0),
+      formatMoney(Math.max(0, Number(expense.amount || 0) - Number(expense.paidAmount || 0))),
+    ])));
+  }
+
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>S7 Robotics Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #102033; }
+          h1 { color: #08244d; margin-bottom: 4px; }
+          h2 { color: #0d3470; margin-top: 24px; border-bottom: 2px solid #d9e4f2; padding-bottom: 6px; }
+          .muted { color: #63738a; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #d9e4f2; padding: 8px; vertical-align: top; }
+          th { background: #e8f1ff; color: #08244d; text-align: left; }
+          .brand { font-size: 13px; color: #1d6fe8; font-weight: bold; text-transform: uppercase; }
+        </style>
+      </head>
+      <body>
+        <div class="brand">S7 Robotics CRM</div>
+        <h1>${reportTitle(type)}</h1>
+        <p class="muted">Сформировано: ${new Date().toLocaleString("ru-RU")} · Автор: ${escapeHtml(currentUser?.name || "Администратор")}</p>
+        ${sections.join("")}
+      </body>
+    </html>`;
+}
+
+function reportTitle(type) {
+  return {
+    full: "Полный отчет образовательного центра",
+    students: "Отчет по ученикам",
+    attendance: "Отчет по посещаемости",
+    schedule: "Отчет по расписанию",
+    finance: "Финансовый отчет",
+  }[type] || "Отчет";
+}
+
+function reportTable(title, headers, rows) {
+  return `
+    <section>
+      <h2>${escapeHtml(title)}</h2>
+      <table>
+        <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${
+            rows.length
+              ? rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")
+              : `<tr><td colspan="${headers.length}">Нет данных</td></tr>`
+          }
+        </tbody>
+      </table>
+    </section>`;
+}
+
+function inDateRange(date, from, to) {
+  if (!date) return false;
+  return (!from || date >= from) && (!to || date <= to);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 function downloadCsv(filename, rows) {
   const csv = rows.map((row) => row.map(csvValue).join(",")).join("\n");
-  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(filename, "\ufeff" + csv, "text/csv;charset=utf-8");
+}
+
+function downloadBlob(filename, content, type) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
