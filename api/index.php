@@ -220,6 +220,7 @@ function init_db(PDO $pdo): void
             group_name text not null,
             time text not null,
             mentor text not null,
+            capacity integer not null default 0,
             created_at text not null default current_timestamp
         );
         create table if not exists trial_lessons (
@@ -315,6 +316,7 @@ function init_db(PDO $pdo): void
     migrate_students_subscription_number($pdo);
     migrate_students_subscription_amount($pdo);
     migrate_planned_expenses_payment($pdo);
+    migrate_schedule_capacity($pdo);
 }
 
 function migrate_users_role_check(PDO $pdo): void
@@ -390,6 +392,17 @@ function migrate_planned_expenses_payment(PDO $pdo): void
     if (!in_array('paid_at', $names, true)) {
         $pdo->exec('alter table planned_expenses add column paid_at text');
     }
+}
+
+function migrate_schedule_capacity(PDO $pdo): void
+{
+    $columns = $pdo->query('pragma table_info(schedule)')->fetchAll();
+    foreach ($columns as $column) {
+        if (($column['name'] ?? '') === 'capacity') {
+            return;
+        }
+    }
+    $pdo->exec('alter table schedule add column capacity integer not null default 0');
 }
 
 function login(PDO $pdo, array $input): void
@@ -1163,12 +1176,13 @@ function reset_xp(PDO $pdo, array $admin, array $input): void
 
 function create_schedule(PDO $pdo, array $admin, array $input): void
 {
-    $stmt = $pdo->prepare('insert into schedule (day, group_name, time, mentor) values (?, ?, ?, ?)');
+    $stmt = $pdo->prepare('insert into schedule (day, group_name, time, mentor, capacity) values (?, ?, ?, ?, ?)');
     $stmt->execute([
         required($input, 'day'),
         required($input, 'group'),
         required($input, 'time'),
         required($input, 'mentor'),
+        max(0, (int)($input['capacity'] ?? 0)),
     ]);
     data_response($pdo, $admin);
 }
@@ -1227,7 +1241,7 @@ function find_trial_slot(PDO $pdo, string $program, string $preferredDate): ?arr
     foreach ($stmt->fetchAll() as $lesson) {
         if (group_program($lesson['group_name']) !== $program) continue;
         $occupied = group_occupancy($pdo, $lesson['group_name']);
-        $capacity = group_capacity($lesson['group_name']);
+        $capacity = schedule_capacity($lesson);
         if ($occupied >= $capacity) continue;
         $lesson['date'] = next_date_for_day($lesson['day'], $preferredDate);
         $lesson['free'] = $capacity - $occupied;
@@ -1245,6 +1259,12 @@ function group_program(string $group): string
 function group_capacity(string $group): int
 {
     return group_program($group) === 'B' ? 9 : 7;
+}
+
+function schedule_capacity(array $lesson): int
+{
+    $capacity = (int)($lesson['capacity'] ?? 0);
+    return $capacity > 0 ? $capacity : group_capacity((string)$lesson['group_name']);
 }
 
 function group_occupancy(PDO $pdo, string $group): int
@@ -1883,6 +1903,7 @@ function schedule_row(array $row): array
         'group' => $row['group_name'],
         'time' => $row['time'],
         'mentor' => $row['mentor'],
+        'capacity' => (int)($row['capacity'] ?? 0),
     ];
 }
 

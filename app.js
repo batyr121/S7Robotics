@@ -543,7 +543,12 @@ function groupCapacity(group) {
   return groupProgram(group) === "B" ? 9 : 7;
 }
 
+function scheduleCapacity(lesson) {
+  return Math.max(1, Number(lesson?.capacity || 0) || groupCapacity(lesson?.group || ""));
+}
+
 const weekDays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const defaultScheduleTimes = ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00", "19:30"];
 
 function todayShortDay() {
   return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][new Date().getDay()];
@@ -576,7 +581,7 @@ function findTrialSlot(program = "A", fromDate = "") {
     .filter((lesson) => groupProgram(lesson.group) === program)
     .map((lesson) => {
       const occupied = groupOccupancy(lesson.group);
-      const capacity = groupCapacity(lesson.group);
+      const capacity = scheduleCapacity(lesson);
       return {
         ...lesson,
         date: nextDateForDay(lesson.day, start),
@@ -1508,9 +1513,10 @@ function renderSchedule() {
   const today = todayShortDay();
   const todayLessons = lessons.filter((lesson) => lesson.day === today);
   const nextLesson = lessons.find((lesson) => lesson.day === today) || lessons[0];
-  const totalSeats = lessons.reduce((sum, lesson) => sum + groupCapacity(lesson.group), 0);
-  const occupiedSeats = lessons.reduce((sum, lesson) => sum + Math.min(groupOccupancy(lesson.group), groupCapacity(lesson.group)), 0);
+  const totalSeats = lessons.reduce((sum, lesson) => sum + scheduleCapacity(lesson), 0);
+  const occupiedSeats = lessons.reduce((sum, lesson) => sum + Math.min(groupOccupancy(lesson.group), scheduleCapacity(lesson)), 0);
   const fillRate = totalSeats ? Math.round((occupiedSeats / totalSeats) * 100) : 0;
+  const times = scheduleTimeSlots(lessons);
   return `
     <div class="toolbar">
       ${isAdmin() ? `<button class="button primary" data-add-schedule type="button">+ Занятие</button>` : ""}
@@ -1523,9 +1529,30 @@ function renderSchedule() {
       ${stat("Ближайший", nextLesson ? `${nextLesson.group}` : "нет", nextLesson ? `${nextLesson.day} · ${nextLesson.time}` : "добавьте занятие")}
     </div>
     <article class="card schedule-board-card">
-      <div class="card-header"><h3>Недельная сетка</h3><span class="badge neutral">${lessons.length} занятий</span></div>
-      <div class="card-body schedule-board">
-        ${weekDays.map((day) => scheduleDayColumn(day, lessons.filter((lesson) => lesson.day === day), today)).join("")}
+      <div class="card-header">
+        <h3>Таблица расписания</h3>
+        <span class="badge neutral">${times.length} временных слотов</span>
+      </div>
+      <div class="schedule-table-wrap">
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th>Время</th>
+              ${weekDays.map((day) => `<th class="${day === today ? "today" : ""}">${day}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${times
+              .map(
+                (time) => `
+                  <tr>
+                    <th>${time}</th>
+                    ${weekDays.map((day) => scheduleTimeCell(day, time, lessons.filter((lesson) => lesson.day === day && lesson.time === time))).join("")}
+                  </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>
       </div>
     </article>
     <article class="card lesson-archive-card">
@@ -1540,25 +1567,27 @@ function renderSchedule() {
   `;
 }
 
-function scheduleDayColumn(day, lessons, today) {
+function scheduleTimeSlots(lessons) {
+  return [...new Set([...defaultScheduleTimes, ...lessons.map((lesson) => lesson.time).filter(Boolean)])].sort((a, b) => a.localeCompare(b));
+}
+
+function scheduleTimeCell(day, time, lessons) {
   return `
-    <section class="schedule-day ${day === today ? "today" : ""}">
-      <div class="schedule-day-head">
-        <strong>${day}</strong>
-        <span>${lessons.length}</span>
+    <td class="${day === todayShortDay() ? "today" : ""}">
+      <div class="schedule-cell">
+        ${lessons.map(scheduleLessonCard).join("")}
+        ${isAdmin() ? `<button class="schedule-add-slot" data-add-schedule-slot="${day}:${time}" type="button">+ слот</button>` : lessons.length ? "" : `<span class="schedule-empty">Свободно</span>`}
       </div>
-      <div class="schedule-day-list">
-        ${lessons.map(scheduleLessonCard).join("") || `<div class="schedule-empty">Нет уроков</div>`}
-      </div>
-    </section>`;
+    </td>`;
 }
 
 function scheduleLessonCard(lesson) {
   const timing = lessonTimingStatus(lesson);
   const assignedStudents = state.students.filter((student) => student.group === lesson.group && student.status !== "pause");
   const occupied = assignedStudents.length;
-  const capacity = groupCapacity(lesson.group);
+  const capacity = scheduleCapacity(lesson);
   const program = groupProgram(lesson.group);
+  const capacityLabel = `${capacity} мест`;
   return `
     <article class="schedule-lesson-card">
       <div class="schedule-lesson-top">
@@ -1566,7 +1595,7 @@ function scheduleLessonCard(lesson) {
         <span class="badge ${timing.tone}">${timing.short}</span>
       </div>
       <h4>${lesson.group}</h4>
-      <small>${program === "B" ? "Программа B · 9 мест" : "Программа A · 7 мест"} · ${lesson.mentor}</small>
+      <small>${program === "B" ? "Программа B" : "Программа A"} · ${capacityLabel} · ${lesson.mentor}</small>
       <div class="schedule-load">
         <span style="--load:${Math.min(100, Math.round((occupied / capacity) * 100))}%"></span>
       </div>
@@ -1642,7 +1671,7 @@ function renderTrials() {
                       <td><strong>${lesson.childName}</strong><small>${lesson.parentName} · ${lesson.phone}</small></td>
                       <td>${programTitle(lesson.program)}<small>${lesson.note || "пробный урок"}</small></td>
                       <td><strong>${formatDate(lesson.date)}</strong><small>${lesson.day} · ${lesson.time}</small></td>
-                      <td>${lesson.group}<small>${groupOccupancy(lesson.group)}/${groupCapacity(lesson.group)} мест</small></td>
+                      <td>${lesson.group}<small>${groupOccupancy(lesson.group)}/${scheduleCapacity(lesson)} мест</small></td>
                       <td>${lesson.mentor}</td>
                       <td>
                         <select class="status-select" data-trial-status="${lesson.id}">
@@ -1677,7 +1706,7 @@ function trialStatusOptions(selected) {
 function trialOpenSlots(program) {
   return (state.schedule || [])
     .filter((lesson) => groupProgram(lesson.group) === program)
-    .reduce((sum, lesson) => sum + Math.max(0, groupCapacity(lesson.group) - groupOccupancy(lesson.group)), 0);
+    .reduce((sum, lesson) => sum + Math.max(0, scheduleCapacity(lesson) - groupOccupancy(lesson.group)), 0);
 }
 
 function attendanceDates(studentIds = visibleStudentIds()) {
@@ -2595,6 +2624,10 @@ function bindViewActions() {
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
   document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
+  document.querySelectorAll("[data-add-schedule-slot]").forEach((button) => {
+    const [day, time] = button.dataset.addScheduleSlot.split(":");
+    button.addEventListener("click", () => openScheduleModal({ day, time }));
+  });
   document.querySelector("[data-add-trial]")?.addEventListener("click", openTrialModal);
   document.querySelector("[data-add-salary]")?.addEventListener("click", openSalaryModal);
   document.querySelector("[data-add-method]")?.addEventListener("click", openMethodModal);
@@ -3263,21 +3296,42 @@ function mentorOptions(selected = "") {
     .join("");
 }
 
-function openScheduleModal() {
+function openScheduleModal(defaults = {}) {
   if (!isAdmin()) return;
   openModal(
     "Занятие в расписании",
     `<form class="modal-form" id="scheduleForm">
-      <label>День<select name="day"><option>Пн</option><option>Вт</option><option>Ср</option><option>Чт</option><option>Пт</option><option>Сб</option><option>Вс</option></select></label>
-      <label>Время<input name="time" type="time" required /></label>
-      <label>Группа<input name="group" required placeholder="A1, NIS, 15 мкр" /></label>
+      <label>День<select name="day">${weekDays.map((day) => `<option ${day === defaults.day ? "selected" : ""}>${day}</option>`).join("")}</select></label>
+      <label>Время<input name="time" type="time" required value="${defaults.time || ""}" /></label>
+      <label>Группа<input name="group" required placeholder="A1, B2, NIS, 15 мкр" /></label>
       <label>Ментор<select name="mentor">${mentorOptions()}</select></label>
+      <label>Программа
+        <select name="program">
+          <option value="A">Программа A</option>
+          <option value="B">Программа B</option>
+        </select>
+      </label>
+      <label>Максимум детей<input name="capacity" type="number" min="1" max="20" value="7" required /></label>
       <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
     </form>`,
   );
+  const groupInput = modalRoot.querySelector("[name='group']");
+  const programSelect = modalRoot.querySelector("[name='program']");
+  const capacityInput = modalRoot.querySelector("[name='capacity']");
+  const syncCapacity = () => {
+    if (document.activeElement === capacityInput && Number(capacityInput.value) > 0) return;
+    const program = programSelect.value || groupProgram(groupInput.value);
+    capacityInput.value = program === "B" ? 9 : 7;
+  };
+  programSelect.addEventListener("change", syncCapacity);
+  groupInput.addEventListener("input", () => {
+    programSelect.value = groupProgram(groupInput.value);
+    syncCapacity();
+  });
   modalRoot.querySelector("#scheduleForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const lesson = Object.fromEntries(new FormData(event.currentTarget).entries());
+    lesson.capacity = Number(lesson.capacity || (lesson.program === "B" ? 9 : 7));
     if (backendEnabled) {
       await apiRequest("create_schedule", lesson);
       closeModal();
@@ -3296,7 +3350,7 @@ function openScheduleSlotsModal(lessonId) {
   const lesson = state.schedule.find((item) => Number(item.id) === Number(lessonId));
   if (!lesson) return;
   const program = groupProgram(lesson.group);
-  const capacity = groupCapacity(lesson.group);
+  const capacity = scheduleCapacity(lesson);
   const assigned = state.students.filter((student) => student.group === lesson.group && student.status !== "pause");
   const assignedIds = new Set(assigned.map((student) => Number(student.id)));
   const candidates = state.students
@@ -3306,7 +3360,7 @@ function openScheduleSlotsModal(lessonId) {
     `Слоты · ${lesson.group}`,
     `<div class="slot-manager">
       <div class="slot-summary">
-        ${stat("Программа", program === "B" ? "B" : "A", `${capacity} мест`)}
+        ${stat("Программа", program === "B" ? "B" : "A", `${capacity} мест максимум`)}
         ${stat("Занято", `${assigned.length}/${capacity}`, assigned.length >= capacity ? "группа заполнена" : `${capacity - assigned.length} свободно`)}
         ${stat("Ментор", lesson.mentor, `${lesson.day} · ${lesson.time}`)}
       </div>
@@ -3329,7 +3383,7 @@ function openScheduleSlotsModal(lessonId) {
           </div>
         </section>
         <section class="slot-board">
-          <div class="section-title"><strong>Слоты группы</strong><small>${program === "B" ? "9 мест" : "7 мест"}</small></div>
+          <div class="section-title"><strong>Слоты группы</strong><small>${capacity} мест</small></div>
           <div class="slot-grid">
             ${Array.from({ length: capacity }, (_, index) => {
               const student = assigned[index];
