@@ -3,6 +3,7 @@ const SESSION_KEY = "s7robotics-session-v1";
 const API_URL = "api/index.php";
 const TOKEN_KEY = "s7robotics-api-token";
 const LESSON_SESSION_KEY = "s7robotics-active-lesson-v1";
+const QR_DECODER_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 const LESSON_DURATION_MINUTES = 90;
 const SEASON_LEVEL_XP = 1000;
 const SEASON_REWARDS = [
@@ -2268,7 +2269,7 @@ function renderInventory() {
       <div class="filters">
         ${isAdmin() ? `<button class="button primary" data-add-inventory-item type="button">+ Вещь</button>` : ""}
         <button class="button secondary" data-start-inventory-audit type="button">Начать инвентаризацию</button>
-        ${items.length ? `<button class="button ghost" data-print-inventory-labels type="button">Печать штрихкодов A4</button>` : ""}
+        ${items.length ? `<button class="button ghost" data-print-inventory-labels type="button">Печать QR A4</button>` : ""}
       </div>
       <span class="badge neutral">еженедельно · последний рабочий день</span>
     </div>
@@ -2276,7 +2277,7 @@ function renderInventory() {
       <article class="card">
         <div class="card-header"><h3>Оборудование</h3><span class="badge neutral">${items.length}</span></div>
         <div class="card-body inventory-grid">
-          ${items.map(inventoryItemCard).join("") || `<div class="empty">Добавьте первую вещь, CRM сама выдаст штрихкод.</div>`}
+          ${items.map(inventoryItemCard).join("") || `<div class="empty">Добавьте первую вещь, CRM сама выдаст QR-код.</div>`}
         </div>
       </article>
       <article class="card">
@@ -2298,7 +2299,7 @@ function inventoryItemCard(item) {
         <small>${item.code} · ${inventoryCategoryLabel(item.category)}${item.location ? ` · ${item.location}` : ""}</small>
         ${item.description ? `<p>${item.description}</p>` : ""}
       </div>
-      <div class="inventory-barcode">${code39Svg(item.code, 190, 52)}</div>
+      <div class="inventory-barcode">${inventoryQrMarkup(item.code, 96)}${code39Svg(item.code, 170, 48)}</div>
       <div class="row-actions">
         ${isAdmin() ? `<button class="button danger compact" data-delete-inventory-item="${item.id}" type="button">Удалить</button>` : ""}
       </div>
@@ -2336,6 +2337,37 @@ function inventoryStatusLabel(status) {
     repair: "Ремонт",
     archived: "Архив",
   }[status] || "Активно";
+}
+
+function inventoryQrMarkup(code, size = 120) {
+  const value = String(code || "").toUpperCase();
+  const src = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(value)}`;
+  return `<img class="inventory-qr" src="${src}" width="${size}" height="${size}" alt="QR ${value}" loading="lazy" />`;
+}
+
+function normalizeInventoryScanValue(value) {
+  const raw = String(value || "").trim();
+  const matchedCode = raw.match(/S7-[0-9A-Z-]+/i)?.[0] || raw;
+  return matchedCode.toUpperCase();
+}
+
+function loadQrDecoder() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector("script[data-qr-decoder]");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.jsQR), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = QR_DECODER_URL;
+    script.async = true;
+    script.dataset.qrDecoder = "true";
+    script.onload = () => resolve(window.jsQR);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
 }
 
 const code39Patterns = {
@@ -3326,11 +3358,11 @@ function openInventoryItemModal() {
 function openInventoryLabelsModal() {
   const items = state.inventoryItems || [];
   openModal(
-    "Печать штрихкодов A4",
+    "Печать QR-этикеток A4",
     `<div class="label-print-modal">
       <div class="form-actions"><button class="button primary" data-print-inventory-sheet type="button">Печать A4</button></div>
       <div class="print-label-sheet">
-        ${items.map((item) => `<article class="barcode-label"><strong>${item.title}</strong>${code39Svg(item.code, 230, 74)}<small>${item.code}${item.location ? ` · ${item.location}` : ""}</small></article>`).join("")}
+        ${items.map((item) => `<article class="barcode-label"><strong>${item.title}</strong>${inventoryQrMarkup(item.code, 118)}<small>${item.code}${item.location ? ` · ${item.location}` : ""}</small></article>`).join("")}
       </div>
     </div>`,
   );
@@ -3342,6 +3374,7 @@ function openInventoryAuditModal() {
   const scanned = new Set();
   let stream = null;
   let detector = null;
+  let canvas = null;
   let scanning = false;
   const renderScanned = () => {
     const codes = [...scanned];
@@ -3360,7 +3393,7 @@ function openInventoryAuditModal() {
     }
   };
   const addCode = (value) => {
-    const code = String(value || "").trim().toUpperCase();
+    const code = normalizeInventoryScanValue(value);
     if (!code) return;
     scanned.add(code);
     renderScanned();
@@ -3381,14 +3414,15 @@ function openInventoryAuditModal() {
       <div class="inventory-scan-hero">
         <div>
           <span class="badge active">обязательная проверка</span>
-          <h3>Сканируйте штрихкоды оборудования</h3>
+          <h3>Сканируйте QR-метки оборудования</h3>
           <p>После сканирования всех вещей нажмите «Закончить», CRM сформирует отчет.</p>
         </div>
         <strong id="inventoryScanStat">0/${expected.length} найдено</strong>
       </div>
       <video id="inventoryVideo" playsinline muted></video>
+      <div class="scan-status" id="inventoryScanStatus">Подключаем камеру...</div>
       <form class="modal-form compact-form" id="manualScanForm">
-        <label>Ручной ввод кода<input name="code" placeholder="S7-00001" /></label>
+        <label>Запасной ввод кода<input name="code" placeholder="S7-00001" /></label>
         <button class="button secondary" type="submit">Добавить</button>
       </form>
       <div class="card-body list" id="inventoryScanList"><div class="empty">Пока ничего не просканировано</div></div>
@@ -3430,39 +3464,60 @@ function openInventoryAuditModal() {
   });
   (async () => {
     const video = modalRoot.querySelector("#inventoryVideo");
+    const statusNode = modalRoot.querySelector("#inventoryScanStatus");
+    const setScanStatus = (message) => {
+      if (statusNode) statusNode.textContent = message;
+    };
     if (!video) return;
     if (!navigator.mediaDevices?.getUserMedia) {
-      video.insertAdjacentHTML("afterend", `<div class="form-alert">Браузер не дал доступ к камере. Используйте ручной ввод кода или откройте сайт через HTTPS.</div>`);
+      setScanStatus("Браузер не дал доступ к камере. Откройте сайт через HTTPS или разрешите камеру.");
       return;
     }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       video.srcObject = stream;
       await video.play();
-      if (!("BarcodeDetector" in window)) {
-        video.insertAdjacentHTML("afterend", `<div class="form-alert">Камера включена, но этот браузер не поддерживает автосканер штрихкодов. Наведите камеру на этикетку и введите код вручную ниже.</div>`);
-        return;
-      }
-      const supported = BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : ["code_39", "code_128", "qr_code"];
-      const formats = ["code_39", "code_128", "qr_code"].filter((format) => supported.includes(format));
-      if (!formats.length) {
-        video.insertAdjacentHTML("afterend", `<div class="form-alert">Камера включена, но браузер не умеет читать эти штрихкоды автоматически. Используйте ручной ввод кода.</div>`);
-        return;
-      }
-      detector = new BarcodeDetector({ formats });
       scanning = true;
-      const tick = async () => {
-        if (!scanning || !detector) return;
-        try {
-          const codes = await detector.detect(video);
-          codes.forEach((code) => addCode(code.rawValue));
-        } catch {}
+      const supported = "BarcodeDetector" in window && BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : [];
+      if ("BarcodeDetector" in window && (!supported.length || supported.includes("qr_code"))) {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        setScanStatus("Камера включена. Наведите QR-метку на экран.");
+        const tick = async () => {
+          if (!scanning || !detector) return;
+          try {
+            const codes = await detector.detect(video);
+            codes.forEach((code) => addCode(code.rawValue));
+          } catch {}
+          requestAnimationFrame(tick);
+        };
+        tick();
+        return;
+      }
+      setScanStatus("Камера включена. Загружаем QR-сканер для этого браузера...");
+      let jsQR = null;
+      try {
+        jsQR = await loadQrDecoder();
+      } catch {
+        setScanStatus("Камера включена, но QR-сканер не загрузился. Проверьте интернет и обновите страницу.");
+        return;
+      }
+      canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      setScanStatus("Камера включена. Наведите QR-метку на экран.");
+      const tick = () => {
+        if (!scanning || !context || !video.videoWidth) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(imageData.data, imageData.width, imageData.height);
+        if (result?.data) addCode(result.data);
         requestAnimationFrame(tick);
       };
       tick();
     } catch (error) {
       const hint = error?.name === "NotAllowedError" ? "Разрешите доступ к камере в настройках браузера." : "Проверьте камеру или используйте ручной ввод кода.";
-      video.insertAdjacentHTML("afterend", `<div class="form-alert">Не удалось включить камеру. ${hint}</div>`);
+      setScanStatus(`Не удалось включить камеру. ${hint}`);
     }
   })();
 }

@@ -2007,11 +2007,21 @@ td small {
 }
 
 .inventory-barcode {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
+  background: white;
+}
+
+.inventory-qr {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
   background: white;
 }
 
@@ -2028,11 +2038,11 @@ td small {
 }
 
 .barcode-label {
-  min-height: 128px;
+  min-height: 168px;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 8px;
   border: 1px dashed #9fb4cf;
   border-radius: 8px;
@@ -2083,6 +2093,16 @@ td small {
   border-radius: 16px;
   background: #071f43;
   object-fit: cover;
+}
+
+.scan-status {
+  padding: 10px 12px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 12px;
+  background: #eef6ff;
+  color: var(--blue-950);
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .compact-form {
