@@ -36,6 +36,8 @@ const seed = {
   trialLessons: [],
   lessonChecks: [],
   tasks: [],
+  inventoryItems: [],
+  inventoryAudits: [],
   xpAdjustments: [],
   salaries: [],
   methods: [],
@@ -104,6 +106,8 @@ function normalizeState(nextState) {
   nextState.trialLessons = nextState.trialLessons || [];
   nextState.lessonChecks = nextState.lessonChecks || [];
   nextState.tasks = nextState.tasks || [];
+  nextState.inventoryItems = nextState.inventoryItems || [];
+  nextState.inventoryAudits = nextState.inventoryAudits || [];
   nextState.xpAdjustments = nextState.xpAdjustments || [];
   nextState.salaries = nextState.salaries || [];
   nextState.methods = nextState.methods || [];
@@ -194,7 +198,7 @@ function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   if (isParent()) return ["dashboard", "students", "attendance", "schedule", "feedback", "parent"].includes(view);
-  return ["dashboard", "students", "attendance", "schedule", "trials", "feedback", "tasks", "methods", "salary", "team"].includes(view);
+  return ["dashboard", "students", "attendance", "schedule", "trials", "feedback", "tasks", "inventory", "methods", "salary", "team"].includes(view);
 }
 
 function visibleStudents() {
@@ -851,6 +855,7 @@ function updatePageTitle() {
     feedback: "Фидбек",
     parent: "Семья",
     tasks: "Задачи",
+    inventory: "Инвентарь",
     methods: "Методика",
     salary: "Зарплаты",
     team: "Команда",
@@ -868,6 +873,7 @@ function render() {
     feedback: renderFeedback,
     parent: renderParentPortal,
     tasks: renderTasks,
+    inventory: renderInventory,
     methods: renderMethods,
     salary: renderSalary,
     team: renderTeam,
@@ -2245,6 +2251,161 @@ function visibleMethods() {
   return (state.methods || []).filter((item) => groups.has(item.group) || item.mentor === currentUser?.name || item.group === "Все группы");
 }
 
+function renderInventory() {
+  const items = state.inventoryItems || [];
+  const activeItems = items.filter((item) => item.status === "active");
+  const audits = state.inventoryAudits || [];
+  const lastAudit = audits[0];
+  const missingLast = lastAudit?.missing?.length || 0;
+  return `
+    <div class="stats-grid">
+      ${stat("Оборудование", items.length, "в базе инвентаря")}
+      ${stat("Активное", activeItems.length, "нужно проверять")}
+      ${stat("Проверок", audits.length, isAdmin() ? "вся команда" : "мои отчеты")}
+      ${stat("Последний отчет", lastAudit ? `${lastAudit.scanned.length}/${lastAudit.expected.length}` : "нет", missingLast ? `${missingLast} не найдено` : "без пропусков")}
+    </div>
+    <div class="toolbar">
+      <div class="filters">
+        ${isAdmin() ? `<button class="button primary" data-add-inventory-item type="button">+ Вещь</button>` : ""}
+        <button class="button secondary" data-start-inventory-audit type="button">Начать инвентаризацию</button>
+        ${items.length ? `<button class="button ghost" data-print-inventory-labels type="button">Печать штрихкодов A4</button>` : ""}
+      </div>
+      <span class="badge neutral">еженедельно · последний рабочий день</span>
+    </div>
+    <div class="module-grid inventory-layout">
+      <article class="card">
+        <div class="card-header"><h3>Оборудование</h3><span class="badge neutral">${items.length}</span></div>
+        <div class="card-body inventory-grid">
+          ${items.map(inventoryItemCard).join("") || `<div class="empty">Добавьте первую вещь, CRM сама выдаст штрихкод.</div>`}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Отчеты проверок</h3><span class="badge active">${audits.length}</span></div>
+        <div class="card-body list">
+          ${audits.map(inventoryAuditRow).join("") || `<div class="empty">Пока нет инвентаризаций</div>`}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function inventoryItemCard(item) {
+  return `
+    <article class="inventory-card">
+      <div>
+        <span class="badge ${item.status === "active" ? "active" : "neutral"}">${inventoryStatusLabel(item.status)}</span>
+        <strong>${item.title}</strong>
+        <small>${item.code} · ${inventoryCategoryLabel(item.category)}${item.location ? ` · ${item.location}` : ""}</small>
+        ${item.description ? `<p>${item.description}</p>` : ""}
+      </div>
+      <div class="inventory-barcode">${code39Svg(item.code, 190, 52)}</div>
+      <div class="row-actions">
+        ${isAdmin() ? `<button class="button danger compact" data-delete-inventory-item="${item.id}" type="button">Удалить</button>` : ""}
+      </div>
+    </article>`;
+}
+
+function inventoryAuditRow(audit) {
+  const missing = audit.missing?.length || 0;
+  const extra = audit.extra?.length || 0;
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${audit.mentor} · ${formatDate(audit.date)}</strong>
+        <small>просканировано ${audit.scanned.length}/${audit.expected.length} · ${missing} отсутствует · ${extra} лишних</small>
+        ${audit.note ? `<small>${audit.note}</small>` : ""}
+      </div>
+      <span class="badge ${missing ? "overdue" : "paid"}">${missing ? "есть пропуски" : "закрыто"}</span>
+    </div>`;
+}
+
+function inventoryCategoryLabel(category) {
+  return {
+    robot: "Робототехника",
+    laptop: "Ноутбук",
+    printer3d: "3D принтер",
+    tool: "Инструмент",
+    consumable: "Расходник",
+    equipment: "Оборудование",
+  }[category] || "Оборудование";
+}
+
+function inventoryStatusLabel(status) {
+  return {
+    active: "Активно",
+    repair: "Ремонт",
+    archived: "Архив",
+  }[status] || "Активно";
+}
+
+const code39Patterns = {
+  "0": "nnnwwnwnn",
+  "1": "wnnwnnnnw",
+  "2": "nnwwnnnnw",
+  "3": "wnwwnnnnn",
+  "4": "nnnwwnnnw",
+  "5": "wnnwwnnnn",
+  "6": "nnwwwnnnn",
+  "7": "nnnwnnwnw",
+  "8": "wnnwnnwnn",
+  "9": "nnwwnnwnn",
+  A: "wnnnnwnnw",
+  B: "nnwnnwnnw",
+  C: "wnwnnwnnn",
+  D: "nnnnwwnnw",
+  E: "wnnnwwnnn",
+  F: "nnwnwwnnn",
+  G: "nnnnnwwnw",
+  H: "wnnnnwwnn",
+  I: "nnwnnwwnn",
+  J: "nnnnwwwnn",
+  K: "wnnnnnnww",
+  L: "nnwnnnnww",
+  M: "wnwnnnnwn",
+  N: "nnnnwnnww",
+  O: "wnnnwnnwn",
+  P: "nnwnwnnwn",
+  Q: "nnnnnnwww",
+  R: "wnnnnnwwn",
+  S: "nnwnnnwwn",
+  T: "nnnnwnwwn",
+  U: "wwnnnnnnw",
+  V: "nwwnnnnnw",
+  W: "wwwnnnnnn",
+  X: "nwnnwnnnw",
+  Y: "wwnnwnnnn",
+  Z: "nwwnwnnnn",
+  "-": "nwnnnnwnw",
+  ".": "wwnnnnwnn",
+  " ": "nwwnnnwnn",
+  "*": "nwnnwnwnn",
+};
+
+function code39Svg(value, width = 220, height = 70) {
+  const text = String(value || "").toUpperCase().replace(/[^0-9A-Z-. ]/g, "");
+  const encoded = `*${text || "S7"}*`;
+  const narrow = 2;
+  const wide = 5;
+  const gap = 2;
+  let x = 8;
+  const bars = [];
+  encoded.split("").forEach((char) => {
+    const pattern = code39Patterns[char] || code39Patterns["0"];
+    pattern.split("").forEach((part, index) => {
+      const barWidth = part === "w" ? wide : narrow;
+      if (index % 2 === 0) bars.push(`<rect x="${x}" y="6" width="${barWidth}" height="${height - 26}" fill="#08244d"/>`);
+      x += barWidth;
+    });
+    x += gap;
+  });
+  const viewWidth = Math.max(width, x + 8);
+  return `<svg viewBox="0 0 ${viewWidth} ${height}" width="${width}" height="${height}" role="img" aria-label="${text}">
+    <rect width="${viewWidth}" height="${height}" fill="#fff"/>
+    ${bars.join("")}
+    <text x="${viewWidth / 2}" y="${height - 6}" text-anchor="middle" font-size="12" font-family="Arial" font-weight="700" fill="#102033">${text}</text>
+  </svg>`;
+}
+
 function renderMethods() {
   const methods = visibleMethods();
   return `
@@ -2602,6 +2763,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-delete-planned-expense]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("plannedExpense", Number(button.dataset.deletePlannedExpense)));
   });
+  document.querySelectorAll("[data-delete-inventory-item]").forEach((button) => {
+    button.addEventListener("click", () => deleteRecord("inventoryItem", Number(button.dataset.deleteInventoryItem)));
+  });
   document.querySelectorAll("[data-toggle-attendance]").forEach((button) => {
     button.addEventListener("click", () => toggleAttendance(button.dataset.toggleAttendance));
   });
@@ -2631,6 +2795,9 @@ function bindViewActions() {
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
+  document.querySelector("[data-add-inventory-item]")?.addEventListener("click", openInventoryItemModal);
+  document.querySelector("[data-start-inventory-audit]")?.addEventListener("click", openInventoryAuditModal);
+  document.querySelector("[data-print-inventory-labels]")?.addEventListener("click", openInventoryLabelsModal);
   document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
   document.querySelectorAll("[data-add-schedule-slot]").forEach((button) => {
     const [day, time] = button.dataset.addScheduleSlot.split(":");
@@ -3116,6 +3283,178 @@ function bindCopyButtons(root) {
   });
 }
 
+function openInventoryItemModal() {
+  if (!isAdmin()) return;
+  openModal(
+    "Новая вещь",
+    `<form class="modal-form" id="inventoryItemForm">
+      <label>Название<input name="title" required placeholder="Например: EV3 набор #4" /></label>
+      <label>Категория
+        <select name="category">
+          <option value="robot">Робототехника</option>
+          <option value="laptop">Ноутбук</option>
+          <option value="printer3d">3D принтер</option>
+          <option value="tool">Инструмент</option>
+          <option value="consumable">Расходник</option>
+          <option value="equipment">Оборудование</option>
+        </select>
+      </label>
+      <label>Локация<input name="location" placeholder="15 мкр, кабинет 2" /></label>
+      <label>Код / штрихкод<input name="code" placeholder="автоматически, если оставить пустым" /></label>
+      <label>Статус<select name="status"><option value="active">Активно</option><option value="repair">Ремонт</option><option value="archived">Архив</option></select></label>
+      <label style="grid-column:1/-1">Описание<textarea name="description" placeholder="Комплектация, серийный номер, состояние"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" type="submit">Сохранить</button></div>
+    </form>`,
+  );
+  modalRoot.querySelector("#inventoryItemForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const item = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (backendEnabled) {
+      await apiRequest("create_inventory_item", item);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    const code = (item.code || `S7-${String((state.inventoryItems || []).length + 1).padStart(5, "0")}`).toUpperCase();
+    state.inventoryItems.unshift({ ...item, code, id: Date.now(), createdBy: currentUser.name, createdAt: new Date().toISOString() });
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function openInventoryLabelsModal() {
+  const items = state.inventoryItems || [];
+  openModal(
+    "Печать штрихкодов A4",
+    `<div class="label-print-modal">
+      <div class="form-actions"><button class="button primary" data-print-inventory-sheet type="button">Печать A4</button></div>
+      <div class="print-label-sheet">
+        ${items.map((item) => `<article class="barcode-label"><strong>${item.title}</strong>${code39Svg(item.code, 230, 74)}<small>${item.code}${item.location ? ` · ${item.location}` : ""}</small></article>`).join("")}
+      </div>
+    </div>`,
+  );
+  modalRoot.querySelector("[data-print-inventory-sheet]").addEventListener("click", () => window.print());
+}
+
+function openInventoryAuditModal() {
+  const expected = (state.inventoryItems || []).filter((item) => item.status === "active");
+  const scanned = new Set();
+  let stream = null;
+  let detector = null;
+  let scanning = false;
+  const renderScanned = () => {
+    const codes = [...scanned];
+    const expectedCodes = new Set(expected.map((item) => item.code));
+    const found = codes.filter((code) => expectedCodes.has(code)).length;
+    const list = modalRoot.querySelector("#inventoryScanList");
+    const statNode = modalRoot.querySelector("#inventoryScanStat");
+    if (statNode) statNode.textContent = `${found}/${expected.length} найдено · ${Math.max(0, expected.length - found)} осталось`;
+    if (list) {
+      list.innerHTML = codes
+        .map((code) => {
+          const item = expected.find((entry) => entry.code === code);
+          return `<div class="list-row"><strong>${code}</strong><small>${item ? item.title : "лишний код / не из базы"}</small></div>`;
+        })
+        .join("") || `<div class="empty">Пока ничего не просканировано</div>`;
+    }
+  };
+  const addCode = (value) => {
+    const code = String(value || "").trim().toUpperCase();
+    if (!code) return;
+    scanned.add(code);
+    renderScanned();
+  };
+  const stopCamera = () => {
+    scanning = false;
+    stream?.getTracks().forEach((track) => track.stop());
+  };
+  const stopOnBackdrop = (event) => {
+    if (event.target === modalRoot) {
+      stopCamera();
+      modalRoot.removeEventListener("click", stopOnBackdrop);
+    }
+  };
+  openModal(
+    "Инвентаризация оборудования",
+    `<div class="inventory-scan">
+      <div class="inventory-scan-hero">
+        <div>
+          <span class="badge active">обязательная проверка</span>
+          <h3>Сканируйте штрихкоды оборудования</h3>
+          <p>После сканирования всех вещей нажмите «Закончить», CRM сформирует отчет.</p>
+        </div>
+        <strong id="inventoryScanStat">0/${expected.length} найдено</strong>
+      </div>
+      <video id="inventoryVideo" playsinline muted></video>
+      <form class="modal-form compact-form" id="manualScanForm">
+        <label>Ручной ввод кода<input name="code" placeholder="S7-00001" /></label>
+        <button class="button secondary" type="submit">Добавить</button>
+      </form>
+      <div class="card-body list" id="inventoryScanList"><div class="empty">Пока ничего не просканировано</div></div>
+      <label class="scan-note">Комментарий<textarea id="inventoryAuditNote" placeholder="Например: проверка пятницы, кабинет 15 мкр"></textarea></label>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" data-finish-inventory-audit type="button">Закончить и сохранить отчет</button></div>
+    </div>`,
+  );
+  modalRoot.addEventListener("click", stopOnBackdrop);
+  modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", stopCamera));
+  modalRoot.querySelector("#manualScanForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    addCode(new FormData(event.currentTarget).get("code"));
+    event.currentTarget.reset();
+  });
+  modalRoot.querySelector("[data-finish-inventory-audit]").addEventListener("click", async () => {
+    stopCamera();
+    const expectedCodes = expected.map((item) => item.code);
+    const scannedCodes = [...scanned];
+    const missing = expectedCodes.filter((code) => !scanned.has(code));
+    const extra = scannedCodes.filter((code) => !expectedCodes.includes(code));
+    const payload = {
+      date: new Date().toISOString().slice(0, 10),
+      expected: expectedCodes,
+      scanned: scannedCodes,
+      missing,
+      extra,
+      note: modalRoot.querySelector("#inventoryAuditNote")?.value || "",
+    };
+    if (backendEnabled) {
+      await apiRequest("create_inventory_audit", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.inventoryAudits.unshift({ ...payload, id: Date.now(), mentor: currentUser.name, createdAt: new Date().toISOString() });
+    saveState();
+    closeModal();
+    render();
+  });
+  (async () => {
+    const video = modalRoot.querySelector("#inventoryVideo");
+    if (!video || !navigator.mediaDevices?.getUserMedia || !("BarcodeDetector" in window)) {
+      video?.insertAdjacentHTML("afterend", `<div class="form-alert">Камера/BarcodeDetector недоступны. Используйте ручной ввод кода.</div>`);
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+      await video.play();
+      detector = new BarcodeDetector({ formats: ["code_39", "code_128", "qr_code"] });
+      scanning = true;
+      const tick = async () => {
+        if (!scanning || !detector) return;
+        try {
+          const codes = await detector.detect(video);
+          codes.forEach((code) => addCode(code.rawValue));
+        } catch {}
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      video.insertAdjacentHTML("afterend", `<div class="form-alert">Не удалось включить камеру. Используйте ручной ввод кода.</div>`);
+    }
+  })();
+}
+
 function openAttendanceHistoryModal(studentId) {
   const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
   if (!student) return;
@@ -3562,6 +3901,7 @@ async function deleteRecord(type, id) {
     plannedExpense: ["delete_planned_expense", "plannedExpenses"],
     trial: ["delete_trial", "trialLessons"],
     certificate: ["delete_certificate", "certificates"],
+    inventoryItem: ["delete_inventory_item", "inventoryItems"],
   };
   const [action, key] = map[type];
   if (backendEnabled) {

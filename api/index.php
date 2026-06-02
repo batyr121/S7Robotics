@@ -76,6 +76,9 @@ try {
         'delete_method' => delete_simple($pdo, require_admin($pdo), $input, 'methods'),
         'create_announcement' => create_announcement($pdo, require_admin($pdo), $input),
         'delete_announcement' => delete_simple($pdo, require_admin($pdo), $input, 'announcements'),
+        'create_inventory_item' => create_inventory_item($pdo, require_admin($pdo), $input),
+        'delete_inventory_item' => delete_simple($pdo, require_admin($pdo), $input, 'inventory_items'),
+        'create_inventory_audit' => create_inventory_audit($pdo, require_user($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -308,6 +311,28 @@ function init_db(PDO $pdo): void
             kind text not null default 'news',
             text text not null,
             expires_at text,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists inventory_items (
+            id integer primary key autoincrement,
+            code text not null unique,
+            title text not null,
+            description text,
+            category text not null default 'equipment',
+            location text,
+            status text not null default 'active',
+            created_by text not null,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists inventory_audits (
+            id integer primary key autoincrement,
+            mentor text not null,
+            date text not null,
+            expected_json text not null,
+            scanned_json text not null,
+            missing_json text not null,
+            extra_json text not null,
+            note text,
             created_at text not null default current_timestamp
         );
     ");
@@ -1328,9 +1353,57 @@ function create_announcement(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function create_inventory_item(PDO $pdo, array $admin, array $input): void
+{
+    $code = trim((string)($input['code'] ?? ''));
+    if ($code === '') {
+        $next = (int)$pdo->query('select coalesce(max(id), 0) + 1 from inventory_items')->fetchColumn();
+        $code = 'S7-' . str_pad((string)$next, 5, '0', STR_PAD_LEFT);
+    }
+    $stmt = $pdo->prepare('
+        insert into inventory_items (code, title, description, category, location, status, created_by)
+        values (?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        strtoupper($code),
+        required($input, 'title'),
+        $input['description'] ?? '',
+        $input['category'] ?? 'equipment',
+        $input['location'] ?? '',
+        $input['status'] ?? 'active',
+        $admin['name'],
+    ]);
+    data_response($pdo, $admin);
+}
+
+function create_inventory_audit(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Инвентаризация доступна только команде.', 403);
+    }
+    $expected = is_array($input['expected'] ?? null) ? $input['expected'] : [];
+    $scanned = is_array($input['scanned'] ?? null) ? $input['scanned'] : [];
+    $missing = is_array($input['missing'] ?? null) ? $input['missing'] : [];
+    $extra = is_array($input['extra'] ?? null) ? $input['extra'] : [];
+    $stmt = $pdo->prepare('
+        insert into inventory_audits (mentor, date, expected_json, scanned_json, missing_json, extra_json, note)
+        values (?, ?, ?, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        $user['name'],
+        $input['date'] ?? date('Y-m-d'),
+        json_encode($expected, JSON_UNESCAPED_UNICODE),
+        json_encode($scanned, JSON_UNESCAPED_UNICODE),
+        json_encode($missing, JSON_UNESCAPED_UNICODE),
+        json_encode($extra, JSON_UNESCAPED_UNICODE),
+        $input['note'] ?? '',
+    ]);
+    data_response($pdo, $user);
+}
+
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
-    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'planned_expenses', 'trial_lessons', 'certificates'];
+    $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'planned_expenses', 'trial_lessons', 'certificates', 'inventory_items'];
     if (!in_array($table, $allowed, true)) fail('Недоступная таблица.', 403);
     $stmt = $pdo->prepare("delete from $table where id = ?");
     $stmt->execute([(int)required($input, 'id')]);
@@ -1369,6 +1442,8 @@ function state_for_user(PDO $pdo, array $user): array
         'methods' => $isAdmin ? all_methods($pdo) : ($isParent ? [] : mentor_methods($pdo, $user)),
         'parentReviews' => $isAdmin ? all_parent_reviews($pdo) : parent_reviews_for_ids($pdo, $ids),
         'announcements' => all_announcements($pdo),
+        'inventoryItems' => $isParent ? [] : all_inventory_items($pdo),
+        'inventoryAudits' => $isParent ? [] : ($isAdmin ? all_inventory_audits($pdo) : mentor_inventory_audits($pdo, $user)),
     ];
 }
 
@@ -1603,6 +1678,23 @@ function parent_reviews_for_ids(PDO $pdo, array $ids): array
 function all_announcements(PDO $pdo): array
 {
     return array_map('announcement_row', $pdo->query('select * from announcements order by created_at desc, id desc')->fetchAll());
+}
+
+function all_inventory_items(PDO $pdo): array
+{
+    return array_map('inventory_item_row', $pdo->query('select * from inventory_items order by created_at desc, id desc')->fetchAll());
+}
+
+function all_inventory_audits(PDO $pdo): array
+{
+    return array_map('inventory_audit_row', $pdo->query('select * from inventory_audits order by date desc, id desc')->fetchAll());
+}
+
+function mentor_inventory_audits(PDO $pdo, array $user): array
+{
+    $stmt = $pdo->prepare('select * from inventory_audits where mentor = ? order by date desc, id desc');
+    $stmt->execute([$user['name']]);
+    return array_map('inventory_audit_row', $stmt->fetchAll());
 }
 
 function insert_user(PDO $pdo, array $user): int
@@ -1892,6 +1984,36 @@ function announcement_row(array $row): array
         'kind' => $row['kind'],
         'text' => $row['text'],
         'expiresAt' => $row['expires_at'],
+    ];
+}
+
+function inventory_item_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'code' => $row['code'],
+        'title' => $row['title'],
+        'description' => $row['description'] ?? '',
+        'category' => $row['category'],
+        'location' => $row['location'] ?? '',
+        'status' => $row['status'],
+        'createdBy' => $row['created_by'],
+        'createdAt' => $row['created_at'],
+    ];
+}
+
+function inventory_audit_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'mentor' => $row['mentor'],
+        'date' => $row['date'],
+        'expected' => json_decode($row['expected_json'] ?? '[]', true) ?: [],
+        'scanned' => json_decode($row['scanned_json'] ?? '[]', true) ?: [],
+        'missing' => json_decode($row['missing_json'] ?? '[]', true) ?: [],
+        'extra' => json_decode($row['extra_json'] ?? '[]', true) ?: [],
+        'note' => $row['note'] ?? '',
+        'createdAt' => $row['created_at'],
     ];
 }
 

@@ -1966,6 +1966,143 @@ td small {
   gap: 10px;
 }
 
+.inventory-layout {
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inventory-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.inventory-card strong,
+.inventory-card small {
+  display: block;
+}
+
+.inventory-card strong {
+  margin-top: 8px;
+  color: var(--blue-950);
+  font-size: 17px;
+}
+
+.inventory-card small,
+.inventory-card p {
+  color: var(--muted);
+}
+
+.inventory-card p {
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.inventory-barcode {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+
+.label-print-modal {
+  padding: 18px;
+}
+
+.print-label-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 14px;
+  background: white;
+}
+
+.barcode-label {
+  min-height: 128px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px dashed #9fb4cf;
+  border-radius: 8px;
+  page-break-inside: avoid;
+  text-align: center;
+}
+
+.barcode-label strong,
+.barcode-label small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.inventory-scan {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.inventory-scan-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff, #eef6ff);
+}
+
+.inventory-scan-hero h3,
+.inventory-scan-hero p {
+  margin: 6px 0 0;
+}
+
+.inventory-scan-hero strong {
+  min-width: 130px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--blue-950);
+  color: white;
+  text-align: center;
+}
+
+#inventoryVideo {
+  width: 100%;
+  max-height: 330px;
+  border-radius: 16px;
+  background: #071f43;
+  object-fit: cover;
+}
+
+.compact-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0;
+}
+
+.scan-note {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.scan-note textarea {
+  min-height: 82px;
+  padding: 10px;
+}
+
 .certificate-row {
   display: flex;
   align-items: center;
@@ -2875,6 +3012,7 @@ td small {
   .cashbox-columns,
   .slot-summary,
   .slot-layout,
+  .inventory-layout,
   .profile-sections,
   .quality-layout,
   .parent-overview {
@@ -2886,6 +3024,7 @@ td small {
   }
 
   .lesson-checklist,
+  .inventory-grid,
   .schedule-board,
   .gamification-grid,
   .season-summary,
@@ -2921,7 +3060,9 @@ td small {
   }
 
   .certificate-paper,
-  .certificate-paper * {
+  .certificate-paper *,
+  .print-label-sheet,
+  .print-label-sheet * {
     visibility: visible;
   }
 
@@ -2929,6 +3070,21 @@ td small {
     position: fixed;
     inset: 18mm;
     box-shadow: none;
+  }
+
+  .print-label-sheet {
+    position: fixed;
+    inset: 8mm;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5mm;
+    padding: 0;
+    background: white;
+  }
+
+  .barcode-label {
+    border: 1px dashed #777;
+    border-radius: 0;
   }
 
   .certificate-actions,
@@ -3110,10 +3266,12 @@ td small {
   .task-board,
   .method-grid,
   .parent-grid,
+  .inventory-grid,
   .cashbox-grid,
   .cashbox-columns,
   .slot-summary,
   .slot-layout,
+  .inventory-layout,
   .finance-pulse-grid,
   .parent-overview,
   .weekly-missions,
