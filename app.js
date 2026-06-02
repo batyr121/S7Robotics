@@ -3430,15 +3430,26 @@ function openInventoryAuditModal() {
   });
   (async () => {
     const video = modalRoot.querySelector("#inventoryVideo");
-    if (!video || !navigator.mediaDevices?.getUserMedia || !("BarcodeDetector" in window)) {
-      video?.insertAdjacentHTML("afterend", `<div class="form-alert">Камера/BarcodeDetector недоступны. Используйте ручной ввод кода.</div>`);
+    if (!video) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      video.insertAdjacentHTML("afterend", `<div class="form-alert">Браузер не дал доступ к камере. Используйте ручной ввод кода или откройте сайт через HTTPS.</div>`);
       return;
     }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       video.srcObject = stream;
       await video.play();
-      detector = new BarcodeDetector({ formats: ["code_39", "code_128", "qr_code"] });
+      if (!("BarcodeDetector" in window)) {
+        video.insertAdjacentHTML("afterend", `<div class="form-alert">Камера включена, но этот браузер не поддерживает автосканер штрихкодов. Наведите камеру на этикетку и введите код вручную ниже.</div>`);
+        return;
+      }
+      const supported = BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : ["code_39", "code_128", "qr_code"];
+      const formats = ["code_39", "code_128", "qr_code"].filter((format) => supported.includes(format));
+      if (!formats.length) {
+        video.insertAdjacentHTML("afterend", `<div class="form-alert">Камера включена, но браузер не умеет читать эти штрихкоды автоматически. Используйте ручной ввод кода.</div>`);
+        return;
+      }
+      detector = new BarcodeDetector({ formats });
       scanning = true;
       const tick = async () => {
         if (!scanning || !detector) return;
@@ -3449,8 +3460,9 @@ function openInventoryAuditModal() {
         requestAnimationFrame(tick);
       };
       tick();
-    } catch {
-      video.insertAdjacentHTML("afterend", `<div class="form-alert">Не удалось включить камеру. Используйте ручной ввод кода.</div>`);
+    } catch (error) {
+      const hint = error?.name === "NotAllowedError" ? "Разрешите доступ к камере в настройках браузера." : "Проверьте камеру или используйте ручной ввод кода.";
+      video.insertAdjacentHTML("afterend", `<div class="form-alert">Не удалось включить камеру. ${hint}</div>`);
     }
   })();
 }
