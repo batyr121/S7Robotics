@@ -77,6 +77,7 @@ let backendEnabled = false;
 let activeView = "dashboard";
 let searchTerm = "";
 let attendanceGroup = "all";
+let attendanceQuickDate = new Date().toISOString().slice(0, 10);
 let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
 let parentQrScanHandled = false;
 let lessonTimerId = null;
@@ -952,6 +953,20 @@ function renderDashboard() {
         </div>
       </article>
     </div>
+    <div class="module-grid ops-grid">
+      <article class="card">
+        <div class="card-header"><h3>Лента событий</h3><span class="badge active">${crmEventFeed().length}</span></div>
+        <div class="card-body event-feed">
+          ${crmEventFeed(10).map(eventFeedRow).join("") || `<div class="empty">Событий пока нет</div>`}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Центр внимания</h3><span class="badge overdue">${studentAttentionList().length}</span></div>
+        <div class="card-body list">
+          ${studentAttentionList(8).map(attentionRow).join("") || `<div class="empty">Рисков не найдено</div>`}
+        </div>
+      </article>
+    </div>
     <article class="card">
       <div class="card-header"><h3>Задачи CRM</h3><span class="badge neutral">${crmTasks().length} активных</span></div>
       <div class="card-body list">
@@ -1045,6 +1060,104 @@ function renderParentDashboard() {
       </article>
     </div>
   `;
+}
+
+function crmEventFeed(limit = Infinity) {
+  const studentsById = new Map((state.students || []).map((student) => [Number(student.id), student]));
+  const events = [
+    ...(visibleAttendance() || []).map((item) => {
+      const student = studentsById.get(Number(item.studentId));
+      return {
+        type: item.status === "present" ? "visit" : "absence",
+        tone: item.status === "present" ? "active" : "overdue",
+        title: item.status === "present" ? "Посещение отмечено" : "НБ в табеле",
+        text: `${student?.name || "Ученик"} · ${student?.group || "группа"} · ${item.topic || "урок"}`,
+        date: item.date,
+      };
+    }),
+    ...(isAdmin() ? state.payments || [] : visiblePayments()).map((payment) => {
+      const student = studentsById.get(Number(payment.studentId));
+      return {
+        type: "payment",
+        tone: payment.status === "paid" ? "paid" : "soon",
+        title: payment.status === "paid" ? "Оплата абонемента" : "Оплата к контролю",
+        text: `${student?.name || "Ученик"} · ${formatMoney(payment.amount)} · ${payment.plan}`,
+        date: payment.date,
+      };
+    }),
+    ...(visibleFeedback() || []).map((note) => {
+      const student = studentsById.get(Number(note.studentId));
+      return {
+        type: "feedback",
+        tone: "neutral",
+        title: "Фидбек ментора",
+        text: `${student?.name || "Ученик"} · ${note.skill}`,
+        date: note.date,
+      };
+    }),
+    ...(visibleTasks() || []).map((task) => ({
+      type: "task",
+      tone: task.status === "done" ? "paid" : task.priority || "soon",
+      title: task.status === "done" ? "Задача закрыта" : "Задача в работе",
+      text: `${task.title} · ${task.assignee || "без ответственного"}`,
+      date: task.dueDate || task.createdAt || new Date().toISOString().slice(0, 10),
+    })),
+    ...(isAdmin() ? state.inventoryWriteoffs || [] : []).map((writeoff) => ({
+      type: "inventory",
+      tone: "overdue",
+      title: "Списание инвентаря",
+      text: `${writeoff.code} · ${writeoff.destination || "без направления"}`,
+      date: writeoff.date,
+    })),
+  ];
+  return events
+    .filter((event) => event.date)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, limit);
+}
+
+function eventFeedRow(event) {
+  return `
+    <div class="event-row">
+      <span class="event-dot ${event.tone}"></span>
+      <div>
+        <strong>${event.title}</strong>
+        <small>${event.text}</small>
+      </div>
+      <time>${formatDate(event.date)}</time>
+    </div>`;
+}
+
+function studentAttentionList(limit = Infinity) {
+  const latestFeedbackByStudent = new Map();
+  (visibleFeedback() || []).forEach((note) => {
+    const current = latestFeedbackByStudent.get(Number(note.studentId));
+    if (!current || new Date(note.date) > new Date(current.date)) latestFeedbackByStudent.set(Number(note.studentId), note);
+  });
+  return visibleStudents()
+    .flatMap((student) => {
+      const sub = subscriptionStatus(student);
+      const items = [];
+      if (sub.needsPayment) items.push({ student, tone: "overdue", title: "Оплата", hint: `${sub.visitLabel}, осталось ${sub.remaining}` });
+      if (sub.needsDirectorLetter) items.push({ student, tone: "overdue", title: "Письмо директору", hint: `${sub.absent} НБ, списание идет с 3-го НБ` });
+      if (sub.absent === 2) items.push({ student, tone: "soon", title: "2 НБ", hint: "следующая НБ уже будет списываться" });
+      if (!latestFeedbackByStudent.has(Number(student.id))) items.push({ student, tone: "neutral", title: "Нет фидбека", hint: "добавьте комментарий после урока" });
+      if (student.status === "pause") items.push({ student, tone: "neutral", title: "Заморозка", hint: "ученик на паузе" });
+      return items;
+    })
+    .slice(0, limit);
+}
+
+function attentionRow(item) {
+  return `
+    <div class="list-row attention-row">
+      <div>
+        <strong>${item.student.name}</strong>
+        <small>${item.student.group} · ${item.title}</small>
+        <small>${item.hint}</small>
+      </div>
+      <span class="badge ${item.tone}">${item.title}</span>
+    </div>`;
 }
 
 function activeLessonBanner() {
@@ -1439,6 +1552,7 @@ function renderAttendance() {
   if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
   const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
   const records = visibleAttendance();
+  const quickDateLabel = formatDate(attendanceQuickDate);
 
   return `
     <div class="toolbar">
@@ -1456,6 +1570,32 @@ function renderAttendance() {
       </div>
       <span class="badge neutral">${isAdmin() ? "админ видит все группы" : isParent() ? "только дети родителя" : "только мои группы"}</span>
     </div>
+    ${
+      !isParent()
+        ? `<article class="card attendance-command">
+            <div>
+              <span class="badge active">быстрая дата</span>
+              <h3>${quickDateLabel}</h3>
+              <p>Выберите дату и отмечайте учеников кнопками «Был» или «НБ» прямо в строке.</p>
+            </div>
+            <div class="attendance-date-tools">
+              ${quickDateButton("Сегодня", new Date())}
+              ${quickDateButton("Вчера", dateWithOffset(-1))}
+              ${quickDateButton("Суббота", nextWeekdayDate(6))}
+              ${quickDateButton("Воскресенье", nextWeekdayDate(0))}
+              <label class="inline-filter">Дата
+                <input id="attendanceQuickDateInput" type="date" value="${attendanceQuickDate}" />
+              </label>
+            </div>
+          </article>`
+        : ""
+    }
+    <div class="stats-grid attendance-smart-stats">
+      ${stat("На оплату", students.filter((student) => subscriptionStatus(student).needsPayment).length, "осталось 0-1 занятий")}
+      ${stat("2 НБ", students.filter((student) => subscriptionStatus(student).absent === 2).length, "следующая НБ списывается")}
+      ${stat("Письмо", students.filter((student) => subscriptionStatus(student).needsDirectorLetter).length, "3+ НБ")}
+      ${stat("Дата", quickDateLabel, "для быстрых отметок")}
+    </div>
     <article class="card">
       <div class="card-header">
         <h3>Табель посещаемости</h3>
@@ -1469,6 +1609,7 @@ function renderAttendance() {
               <th>Группа</th>
               <th>Абонемент</th>
               ${Array.from({ length: 8 }, (_, index) => `<th>${index + 1}</th>`).join("")}
+              ${!isParent() ? `<th>${quickDateLabel}</th>` : ""}
               <th>Итого</th>
             </tr>
           </thead>
@@ -1491,6 +1632,7 @@ function renderAttendance() {
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
+                      ${!isParent() ? `<td>${quickAttendanceCell(student, records)}</td>` : ""}
                       <td>
                         <strong>${sub.totalProgressVisits}</strong>
                         <small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small>
@@ -1501,7 +1643,7 @@ function renderAttendance() {
                       </td>
                     </tr>`;
                 })
-                .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+                .join("") || `<tr><td colspan="${isParent() ? 12 : 13}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
             }
           </tbody>
         </table>
@@ -1522,6 +1664,35 @@ function subscriptionBadge(sub) {
       <strong>#${sub.currentSubscriptionNumber}</strong>
       <small>${sub.currentCycleUsed}/8</small>
     </div>`;
+}
+
+function quickAttendanceCell(student, records) {
+  const record = records.find((item) => Number(item.studentId) === Number(student.id) && item.date === attendanceQuickDate);
+  const status = record?.status;
+  return `
+    <div class="quick-attendance-cell">
+      <span class="mark ${status || "missed"}">${status === "present" ? "Б" : status === "absent" ? "НБ" : "-"}</span>
+      <button class="button primary compact" data-mark-attendance="${student.id}:present" type="button">Был</button>
+      <button class="button ghost compact" data-mark-attendance="${student.id}:absent" type="button">НБ</button>
+    </div>`;
+}
+
+function quickDateButton(label, date) {
+  const value = date.toISOString().slice(0, 10);
+  return `<button class="button ${value === attendanceQuickDate ? "primary" : "ghost"} compact" data-attendance-date="${value}" type="button">${label}</button>`;
+}
+
+function dateWithOffset(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return date;
+}
+
+function nextWeekdayDate(dayIndex) {
+  const date = new Date();
+  const diff = (dayIndex - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + diff);
+  return date;
 }
 
 function renderSchedule() {
@@ -2826,6 +2997,19 @@ function bindViewActions() {
   document.querySelectorAll("[data-quick-attendance]").forEach((button) => {
     button.addEventListener("click", () => quickMarkAttendance(button.dataset.quickAttendance));
   });
+  document.querySelectorAll("[data-mark-attendance]").forEach((button) => {
+    button.addEventListener("click", () => markAttendanceOnDate(button.dataset.markAttendance));
+  });
+  document.querySelectorAll("[data-attendance-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      attendanceQuickDate = button.dataset.attendanceDate;
+      render();
+    });
+  });
+  document.querySelector("#attendanceQuickDateInput")?.addEventListener("change", (event) => {
+    attendanceQuickDate = event.target.value || new Date().toISOString().slice(0, 10);
+    render();
+  });
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
@@ -2980,6 +3164,38 @@ async function quickMarkAttendance(payload) {
     return;
   }
   state.attendance.unshift({ ...item, id: Date.now() });
+  syncStudentSubscription(studentId);
+  saveState();
+  render();
+}
+
+async function markAttendanceOnDate(payload) {
+  const [studentIdRaw, status] = String(payload).split(":");
+  const studentId = Number(studentIdRaw);
+  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  if (!student || isParent()) return;
+  const item = {
+    studentId,
+    date: attendanceQuickDate,
+    status: status === "absent" ? "absent" : "present",
+    topic: status === "absent" ? "Быстрая НБ" : "Быстрая отметка",
+  };
+  if (backendEnabled) {
+    try {
+      await apiRequest("create_attendance", item);
+      await refreshData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  const record = state.attendance.find((entry) => Number(entry.studentId) === studentId && entry.date === attendanceQuickDate);
+  if (record) {
+    record.status = item.status;
+    record.topic = item.topic;
+  } else {
+    state.attendance.unshift({ ...item, id: Date.now() });
+  }
   syncStudentSubscription(studentId);
   saveState();
   render();
@@ -3285,18 +3501,40 @@ function openParentMessagesModal(studentId) {
       text: `Здравствуйте! У ${student.name} сейчас абонемент #${sub.currentSubscriptionNumber}, использовано ${sub.visitLabel}, осталось ${sub.remaining} занятий.`,
     },
     {
+      title: "Абонемент қалдығы",
+      text: `Сәлеметсіз бе! ${student.name} бойынша абонемент #${sub.currentSubscriptionNumber}: ${sub.visitLabel} қолданылды, ${sub.remaining} сабақ қалды.`,
+    },
+    {
       title: "3 НБ и письмо директору",
       text: `Здравствуйте! У ${student.name} уже ${sub.absent} НБ. По правилам центра нужно направить письмо на имя директора. Начиная с 3-го НБ занятия списываются с абонемента.`,
+    },
+    {
+      title: "3 НБ туралы ескерту",
+      text: `Сәлеметсіз бе! ${student.name} бойынша ${sub.absent} НБ тіркелді. Орталық ережесі бойынша директор атына өтініш жазу қажет. 3-ші НБ-дан бастап сабақ абонементтен шегеріледі.`,
     },
     {
       title: "Посещение урока",
       text: `Здравствуйте! ${student.name} сегодня был(а) на занятии S7 Robotics. Спасибо за пунктуальность!`,
     },
     {
+      title: "Сабаққа қатысу",
+      text: `Сәлеметсіз бе! ${student.name} бүгін S7 Robotics сабағына қатысты. Уақтылы келгеніңіз үшін рақмет!`,
+    },
+    {
       title: "Фидбек ментора",
       text: latestFeedback
         ? `Здравствуйте! По ${student.name} есть новый фидбек от ментора: ${latestFeedback.skill}. ${latestFeedback.text}`
         : `Здравствуйте! После следующего занятия ментор добавит фидбек по прогрессу ${student.name}.`,
+    },
+    {
+      title: "Ментор пікірі",
+      text: latestFeedback
+        ? `Сәлеметсіз бе! ${student.name} бойынша ментордан жаңа пікір бар: ${latestFeedback.skill}. ${latestFeedback.text}`
+        : `Сәлеметсіз бе! Келесі сабақтан кейін ментор ${student.name} прогресі бойынша пікір қосады.`,
+    },
+    {
+      title: "Төлем еске салу",
+      text: `Сәлеметсіз бе! ${student.name} бойынша келесі төлемді ${sub.nextPaymentDate ? formatDate(sub.nextPaymentDate) : "жақын күндері"} жасау қажет. Қалған сабақ саны: ${sub.remaining}.`,
     },
   ];
   const phone = String(student.phone || "").replace(/\D/g, "");

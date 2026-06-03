@@ -1215,6 +1215,11 @@ select {
   grid-template-columns: 1.3fr 0.9fr;
 }
 
+.ops-grid {
+  margin-top: 14px;
+  grid-template-columns: 1.05fr 0.95fr;
+}
+
 .card {
   min-width: 0;
   position: relative;
@@ -1773,8 +1778,42 @@ td small {
   min-width: 170px;
 }
 
+.inline-filter input {
+  min-width: 150px;
+}
+
+.attendance-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 16px;
+}
+
+.attendance-command h3,
+.attendance-command p {
+  margin: 6px 0 0;
+}
+
+.attendance-command p {
+  color: var(--muted);
+}
+
+.attendance-date-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attendance-smart-stats {
+  margin-bottom: 14px;
+}
+
 .attendance-table {
-  min-width: 1040px;
+  min-width: 1160px;
 }
 
 .attendance-table th,
@@ -1815,6 +1854,70 @@ td small {
 .mark.absent {
   background: rgba(226, 75, 91, 0.12);
   color: #b02c3b;
+}
+
+.quick-attendance-cell {
+  min-width: 148px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-feed {
+  display: grid;
+  gap: 10px;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.event-row strong,
+.event-row small {
+  display: block;
+}
+
+.event-row small,
+.event-row time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 5px rgba(124, 139, 160, 0.12);
+}
+
+.event-dot.active,
+.event-dot.paid {
+  background: var(--green);
+  box-shadow: 0 0 0 5px rgba(18, 168, 122, 0.13);
+}
+
+.event-dot.soon {
+  background: var(--amber);
+  box-shadow: 0 0 0 5px rgba(255, 183, 77, 0.16);
+}
+
+.event-dot.overdue {
+  background: var(--red);
+  box-shadow: 0 0 0 5px rgba(233, 67, 67, 0.13);
+}
+
+.attention-row {
+  border-left: 4px solid rgba(29, 111, 232, 0.24);
 }
 
 .mark.missed {
@@ -3085,6 +3188,7 @@ td small {
   .lesson-archive-row,
   .finance-pulse-row,
   .lesson-mode-hero,
+  .attendance-command,
   .section-title,
   .lesson-student-row,
   .lesson-feedback-row {
@@ -3092,6 +3196,7 @@ td small {
   }
 
   .lesson-mode-hero,
+  .attendance-command,
   .section-title {
     display: grid;
   }
@@ -3239,6 +3344,24 @@ td small {
 
   .eyebrow {
     font-size: 11px;
+  }
+
+  .attendance-date-tools,
+  .quick-attendance-cell {
+    justify-content: stretch;
+  }
+
+  .attendance-date-tools > *,
+  .quick-attendance-cell .button {
+    flex: 1 1 120px;
+  }
+
+  .event-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .event-row time {
+    grid-column: 2;
   }
 
   .toolbar,
