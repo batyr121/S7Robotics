@@ -1287,6 +1287,12 @@ select {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(247, 250, 255, 0.32));
 }
 
+.sub-card-head {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
 .card-header h3 {
   margin: 0;
   font-size: 18px;
@@ -2103,6 +2109,23 @@ td small {
   color: var(--blue-950);
   font-size: 13px;
   font-weight: 850;
+}
+
+.writeoff-selected {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(233, 67, 67, 0.22);
+  border-radius: 14px;
+  background: #fff5f5;
+}
+
+.writeoff-selected strong {
+  color: var(--blue-950);
+}
+
+.writeoff-selected small {
+  color: var(--muted);
 }
 
 .compact-form {

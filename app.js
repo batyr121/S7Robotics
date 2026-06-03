@@ -39,6 +39,7 @@ const seed = {
   tasks: [],
   inventoryItems: [],
   inventoryAudits: [],
+  inventoryWriteoffs: [],
   xpAdjustments: [],
   salaries: [],
   methods: [],
@@ -109,6 +110,7 @@ function normalizeState(nextState) {
   nextState.tasks = nextState.tasks || [];
   nextState.inventoryItems = nextState.inventoryItems || [];
   nextState.inventoryAudits = nextState.inventoryAudits || [];
+  nextState.inventoryWriteoffs = nextState.inventoryWriteoffs || [];
   nextState.xpAdjustments = nextState.xpAdjustments || [];
   nextState.salaries = nextState.salaries || [];
   nextState.methods = nextState.methods || [];
@@ -2256,19 +2258,19 @@ function renderInventory() {
   const items = state.inventoryItems || [];
   const activeItems = items.filter((item) => item.status === "active");
   const audits = state.inventoryAudits || [];
-  const lastAudit = audits[0];
-  const missingLast = lastAudit?.missing?.length || 0;
+  const writeoffs = state.inventoryWriteoffs || [];
   return `
     <div class="stats-grid">
       ${stat("Оборудование", items.length, "в базе инвентаря")}
       ${stat("Активное", activeItems.length, "нужно проверять")}
       ${stat("Проверок", audits.length, isAdmin() ? "вся команда" : "мои отчеты")}
-      ${stat("Последний отчет", lastAudit ? `${lastAudit.scanned.length}/${lastAudit.expected.length}` : "нет", missingLast ? `${missingLast} не найдено` : "без пропусков")}
+      ${stat("Списано", writeoffs.length, writeoffs[0] ? `${writeoffs[0].code} · ${formatDate(writeoffs[0].date)}` : "журнал пуст")}
     </div>
     <div class="toolbar">
       <div class="filters">
         ${isAdmin() ? `<button class="button primary" data-add-inventory-item type="button">+ Вещь</button>` : ""}
         <button class="button secondary" data-start-inventory-audit type="button">Начать инвентаризацию</button>
+        ${isAdmin() ? `<button class="button danger" data-start-inventory-writeoff type="button">Списать по QR</button>` : ""}
         ${items.length ? `<button class="button ghost" data-print-inventory-labels type="button">Печать QR A4</button>` : ""}
       </div>
       <span class="badge neutral">еженедельно · последний рабочий день</span>
@@ -2284,6 +2286,10 @@ function renderInventory() {
         <div class="card-header"><h3>Отчеты проверок</h3><span class="badge active">${audits.length}</span></div>
         <div class="card-body list">
           ${audits.map(inventoryAuditRow).join("") || `<div class="empty">Пока нет инвентаризаций</div>`}
+        </div>
+        <div class="card-header sub-card-head"><h3>Журнал списаний</h3><span class="badge overdue">${writeoffs.length}</span></div>
+        <div class="card-body list">
+          ${writeoffs.map(inventoryWriteoffRow).join("") || `<div class="empty">Списаний пока нет</div>`}
         </div>
       </article>
     </div>
@@ -2320,6 +2326,18 @@ function inventoryAuditRow(audit) {
     </div>`;
 }
 
+function inventoryWriteoffRow(writeoff) {
+  return `
+    <div class="list-row">
+      <div>
+        <strong>${writeoff.code} · ${writeoff.title || "вещь из инвентаря"}</strong>
+        <small>${formatDate(writeoff.date)} · ${writeoff.destination || "куда не указано"}</small>
+        <small>${writeoff.reason || "причина не указана"}${writeoff.note ? ` · ${writeoff.note}` : ""}</small>
+      </div>
+      <span class="badge overdue">${writeoff.createdBy || "админ"}</span>
+    </div>`;
+}
+
 function inventoryCategoryLabel(category) {
   return {
     robot: "Робототехника",
@@ -2336,6 +2354,7 @@ function inventoryStatusLabel(status) {
     active: "Активно",
     repair: "Ремонт",
     archived: "Архив",
+    written_off: "Списано",
   }[status] || "Активно";
 }
 
@@ -2829,6 +2848,7 @@ function bindViewActions() {
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
   document.querySelector("[data-add-inventory-item]")?.addEventListener("click", openInventoryItemModal);
   document.querySelector("[data-start-inventory-audit]")?.addEventListener("click", openInventoryAuditModal);
+  document.querySelector("[data-start-inventory-writeoff]")?.addEventListener("click", openInventoryWriteoffModal);
   document.querySelector("[data-print-inventory-labels]")?.addEventListener("click", openInventoryLabelsModal);
   document.querySelector("[data-add-schedule]")?.addEventListener("click", openScheduleModal);
   document.querySelectorAll("[data-add-schedule-slot]").forEach((button) => {
@@ -3367,6 +3387,161 @@ function openInventoryLabelsModal() {
     </div>`,
   );
   modalRoot.querySelector("[data-print-inventory-sheet]").addEventListener("click", () => window.print());
+}
+
+function openInventoryWriteoffModal() {
+  if (!isAdmin()) return;
+  const items = state.inventoryItems || [];
+  let selectedItem = null;
+  let stream = null;
+  let detector = null;
+  let canvas = null;
+  let scanning = false;
+  const setSelectedItem = (value) => {
+    const code = normalizeInventoryScanValue(value);
+    if (!code) return;
+    const item = items.find((entry) => entry.code === code);
+    const selectedNode = modalRoot.querySelector("#writeoffSelectedItem");
+    const codeInput = modalRoot.querySelector("#inventoryWriteoffForm [name='code']");
+    if (codeInput) codeInput.value = code;
+    selectedItem = item || { code, title: "Не найдено в базе", status: "unknown", location: "" };
+    if (selectedNode) {
+      selectedNode.innerHTML = item
+        ? `<strong>${item.title}</strong><small>${item.code} · ${inventoryCategoryLabel(item.category)} · ${inventoryStatusLabel(item.status)}${item.location ? ` · ${item.location}` : ""}</small>`
+        : `<strong>${code}</strong><small>Код не найден в базе. Проверьте QR или добавьте вещь перед списанием.</small>`;
+    }
+  };
+  const stopCamera = () => {
+    scanning = false;
+    stream?.getTracks().forEach((track) => track.stop());
+  };
+  openModal(
+    "Списание оборудования по QR",
+    `<div class="inventory-scan">
+      <div class="inventory-scan-hero">
+        <div>
+          <span class="badge overdue">списание</span>
+          <h3>Сканируйте QR вещи</h3>
+          <p>CRM найдет оборудование, а вы укажете причину и куда оно списывается.</p>
+        </div>
+        <strong>только админ</strong>
+      </div>
+      <video id="inventoryWriteoffVideo" playsinline muted></video>
+      <div class="scan-status" id="inventoryWriteoffStatus">Подключаем камеру...</div>
+      <div class="writeoff-selected" id="writeoffSelectedItem"><strong>Вещь не выбрана</strong><small>Наведите камеру на QR-этикетку.</small></div>
+      <form class="modal-form" id="inventoryWriteoffForm">
+        <label>Код QR<input name="code" required placeholder="S7-00001" /></label>
+        <label>Дата списания<input name="date" type="date" required value="${new Date().toISOString().slice(0, 10)}" /></label>
+        <label>Куда списывается<input name="destination" required placeholder="Утилизация, продажа, донор деталей, другой филиал" /></label>
+        <label>Причина
+          <select name="reason">
+            <option value="Поломка / ремонт нецелесообразен">Поломка / ремонт нецелесообразен</option>
+            <option value="Передано в другой филиал">Передано в другой филиал</option>
+            <option value="Продано">Продано</option>
+            <option value="Потеряно">Потеряно</option>
+            <option value="Использовано как расходник">Использовано как расходник</option>
+            <option value="Другое">Другое</option>
+          </select>
+        </label>
+        <label style="grid-column:1/-1">Комментарий<textarea name="note" placeholder="Например: не включается, плата снята на запчасти, акт согласован"></textarea></label>
+        <div class="form-actions">
+          <button class="button ghost" data-close-modal type="button">Отмена</button>
+          <button class="button danger" type="submit">Списать вещь</button>
+        </div>
+      </form>
+    </div>`,
+  );
+  modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", stopCamera));
+  modalRoot.querySelector("#inventoryWriteoffForm [name='code']").addEventListener("input", (event) => setSelectedItem(event.target.value));
+  modalRoot.querySelector("#inventoryWriteoffForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    stopCamera();
+    const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+    payload.code = normalizeInventoryScanValue(payload.code);
+    const item = items.find((entry) => entry.code === payload.code);
+    if (!item) {
+      modalRoot.querySelector("#inventoryWriteoffStatus").textContent = "Этот код не найден в базе. Сначала добавьте вещь в инвентарь.";
+      return;
+    }
+    if (backendEnabled) {
+      await apiRequest("create_inventory_writeoff", payload);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    const writeoff = {
+      ...payload,
+      id: Date.now(),
+      itemId: item.id,
+      title: item.title,
+      category: item.category,
+      createdBy: currentUser.name,
+      createdAt: new Date().toISOString(),
+    };
+    state.inventoryWriteoffs.unshift(writeoff);
+    state.inventoryItems = state.inventoryItems.map((entry) => (entry.code === payload.code ? { ...entry, status: "written_off" } : entry));
+    saveState();
+    closeModal();
+    render();
+  });
+  (async () => {
+    const video = modalRoot.querySelector("#inventoryWriteoffVideo");
+    const statusNode = modalRoot.querySelector("#inventoryWriteoffStatus");
+    const setScanStatus = (message) => {
+      if (statusNode) statusNode.textContent = message;
+    };
+    if (!video) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScanStatus("Браузер не дал доступ к камере. Откройте сайт через HTTPS или разрешите камеру.");
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+      await video.play();
+      scanning = true;
+      const supported = "BarcodeDetector" in window && BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : [];
+      if ("BarcodeDetector" in window && (!supported.length || supported.includes("qr_code"))) {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        setScanStatus("Камера включена. Наведите QR-метку на экран.");
+        const tick = async () => {
+          if (!scanning || !detector) return;
+          try {
+            const codes = await detector.detect(video);
+            if (codes[0]?.rawValue) setSelectedItem(codes[0].rawValue);
+          } catch {}
+          requestAnimationFrame(tick);
+        };
+        tick();
+        return;
+      }
+      setScanStatus("Камера включена. Загружаем QR-сканер для этого браузера...");
+      let jsQR = null;
+      try {
+        jsQR = await loadQrDecoder();
+      } catch {
+        setScanStatus("Камера включена, но QR-сканер не загрузился. Проверьте интернет и обновите страницу.");
+        return;
+      }
+      canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      setScanStatus("Камера включена. Наведите QR-метку на экран.");
+      const tick = () => {
+        if (!scanning || !context || !video.videoWidth) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(imageData.data, imageData.width, imageData.height);
+        if (result?.data) setSelectedItem(result.data);
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (error) {
+      const hint = error?.name === "NotAllowedError" ? "Разрешите доступ к камере в настройках браузера." : "Проверьте камеру или введите код в поле.";
+      setScanStatus(`Не удалось включить камеру. ${hint}`);
+    }
+  })();
 }
 
 function openInventoryAuditModal() {

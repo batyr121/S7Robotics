@@ -79,6 +79,7 @@ try {
         'create_inventory_item' => create_inventory_item($pdo, require_admin($pdo), $input),
         'delete_inventory_item' => delete_simple($pdo, require_admin($pdo), $input, 'inventory_items'),
         'create_inventory_audit' => create_inventory_audit($pdo, require_user($pdo), $input),
+        'create_inventory_writeoff' => create_inventory_writeoff($pdo, require_admin($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -333,6 +334,19 @@ function init_db(PDO $pdo): void
             missing_json text not null,
             extra_json text not null,
             note text,
+            created_at text not null default current_timestamp
+        );
+        create table if not exists inventory_writeoffs (
+            id integer primary key autoincrement,
+            item_id integer references inventory_items(id) on delete set null,
+            code text not null,
+            title text not null,
+            category text not null default 'equipment',
+            destination text not null,
+            reason text not null,
+            note text,
+            date text not null,
+            created_by text not null,
             created_at text not null default current_timestamp
         );
     ");
@@ -1401,6 +1415,45 @@ function create_inventory_audit(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function create_inventory_writeoff(PDO $pdo, array $admin, array $input): void
+{
+    $code = strtoupper(trim((string)required($input, 'code')));
+    $stmt = $pdo->prepare('select * from inventory_items where code = ?');
+    $stmt->execute([$code]);
+    $item = $stmt->fetch();
+    if (!$item) {
+        fail('Вещь с таким QR-кодом не найдена.', 404);
+    }
+    if (($item['status'] ?? '') === 'written_off') {
+        fail('Эта вещь уже списана.', 409);
+    }
+    $pdo->beginTransaction();
+    try {
+        $insert = $pdo->prepare('
+            insert into inventory_writeoffs (item_id, code, title, category, destination, reason, note, date, created_by)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ');
+        $insert->execute([
+            (int)$item['id'],
+            $code,
+            $item['title'],
+            $item['category'] ?? 'equipment',
+            required($input, 'destination'),
+            required($input, 'reason'),
+            $input['note'] ?? '',
+            $input['date'] ?? date('Y-m-d'),
+            $admin['name'],
+        ]);
+        $update = $pdo->prepare("update inventory_items set status = 'written_off' where id = ?");
+        $update->execute([(int)$item['id']]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+    data_response($pdo, $admin);
+}
+
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
     $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'planned_expenses', 'trial_lessons', 'certificates', 'inventory_items'];
@@ -1444,6 +1497,7 @@ function state_for_user(PDO $pdo, array $user): array
         'announcements' => all_announcements($pdo),
         'inventoryItems' => $isParent ? [] : all_inventory_items($pdo),
         'inventoryAudits' => $isParent ? [] : ($isAdmin ? all_inventory_audits($pdo) : mentor_inventory_audits($pdo, $user)),
+        'inventoryWriteoffs' => $isAdmin ? all_inventory_writeoffs($pdo) : [],
     ];
 }
 
@@ -1695,6 +1749,11 @@ function mentor_inventory_audits(PDO $pdo, array $user): array
     $stmt = $pdo->prepare('select * from inventory_audits where mentor = ? order by date desc, id desc');
     $stmt->execute([$user['name']]);
     return array_map('inventory_audit_row', $stmt->fetchAll());
+}
+
+function all_inventory_writeoffs(PDO $pdo): array
+{
+    return array_map('inventory_writeoff_row', $pdo->query('select * from inventory_writeoffs order by date desc, id desc')->fetchAll());
 }
 
 function insert_user(PDO $pdo, array $user): int
@@ -2013,6 +2072,23 @@ function inventory_audit_row(array $row): array
         'missing' => json_decode($row['missing_json'] ?? '[]', true) ?: [],
         'extra' => json_decode($row['extra_json'] ?? '[]', true) ?: [],
         'note' => $row['note'] ?? '',
+        'createdAt' => $row['created_at'],
+    ];
+}
+
+function inventory_writeoff_row(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'itemId' => isset($row['item_id']) ? (int)$row['item_id'] : null,
+        'code' => $row['code'],
+        'title' => $row['title'],
+        'category' => $row['category'],
+        'destination' => $row['destination'],
+        'reason' => $row['reason'],
+        'note' => $row['note'] ?? '',
+        'date' => $row['date'],
+        'createdBy' => $row['created_by'],
         'createdAt' => $row['created_at'],
     ];
 }
