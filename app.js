@@ -1627,7 +1627,7 @@ function renderAttendance() {
                       ? `НБ ${sub.absent}/2 без списания`
                       : `${presentCount} посещений в истории`;
                   return `
-                    <tr>
+                    <tr class="${sub.remaining === 2 ? "attendance-warning-row" : ""}">
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
@@ -1660,9 +1660,9 @@ function currentSubscriptionCells(student, sub = subscriptionStatus(student)) {
 
 function subscriptionBadge(sub) {
   return `
-    <div class="subscription-badge ${sub.expired ? "expired" : ""}">
+    <div class="subscription-badge ${sub.expired ? "expired" : ""} ${sub.remaining === 2 ? "warning" : ""}">
       <strong>#${sub.currentSubscriptionNumber}</strong>
-      <small>${sub.currentCycleUsed}/8</small>
+      <small>${sub.currentCycleUsed}/8${sub.remaining === 2 ? " · осталось 2" : ""}</small>
     </div>`;
 }
 
