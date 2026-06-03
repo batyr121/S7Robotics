@@ -2370,7 +2370,8 @@ td small {
   margin-bottom: 8px;
 }
 
-.lesson-launch-card {
+.lesson-launch-card,
+.lesson-report-card {
   margin-bottom: 14px;
 }
 
@@ -2769,6 +2770,35 @@ td small {
   font-weight: 850;
 }
 
+.lesson-report-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 18px;
+}
+
+.lesson-report-summary div {
+  padding: 13px;
+  border: 1px solid rgba(29, 111, 232, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f5f9ff);
+}
+
+.lesson-report-summary strong,
+.lesson-report-summary small {
+  display: block;
+}
+
+.lesson-report-summary strong {
+  color: var(--blue-950);
+  font-size: 24px;
+}
+
+.lesson-report-summary small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .lesson-check-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2830,7 +2860,7 @@ td small {
 .lesson-feedback-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 12px;
@@ -2843,6 +2873,50 @@ td small {
   grid-template-columns: minmax(0, 1fr) 180px;
   border-color: rgba(29, 111, 232, 0.14);
   background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.lesson-status-choice {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(42px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 13px;
+  background: #edf4ff;
+}
+
+.lesson-status-choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lesson-status-choice label {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.lesson-status-choice input:checked + label {
+  background: white;
+  color: var(--blue-950);
+  box-shadow: 0 8px 18px rgba(8, 36, 77, 0.10);
+}
+
+.lesson-status-choice input[value="present"]:checked + label {
+  color: #08785a;
+}
+
+.lesson-status-choice input[value="absent"]:checked + label {
+  color: #b02c3b;
 }
 
 .lesson-student-row.payment {
@@ -3188,6 +3262,7 @@ td small {
   .schedule-board,
   .gamification-grid,
   .season-summary,
+  .lesson-report-summary,
   .weekly-missions,
   .season-pass,
   .photo-report-grid,

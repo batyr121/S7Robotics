@@ -882,10 +882,9 @@ function render() {
     salary: renderSalary,
     team: renderTeam,
   };
-  appView.innerHTML = `${activeLessonBanner()}${renderers[activeView]()}`;
+  appView.innerHTML = renderers[activeView]();
   bindViewActions();
   updateToday();
-  syncLessonTimer();
 }
 
 function updateToday() {
@@ -1246,10 +1245,10 @@ function lessonLaunchPanel() {
   const lessons = lessonLaunchList().slice(0, 4);
   if (!lessons.length) return "";
   return `
-    <article class="card lesson-launch-card">
+    <article class="card lesson-report-card">
       <div class="card-header">
-        <h3>Пульт урока</h3>
-        <span class="badge active">${lessons.length} ближайших</span>
+        <h3>Отчеты по урокам</h3>
+        <span class="badge active">${lessons.length} по расписанию</span>
       </div>
       <div class="lesson-launch-list">
         ${lessons
@@ -1260,7 +1259,7 @@ function lessonLaunchPanel() {
                 <small>${lesson.day} · ${lesson.mentor} · ${students.length} учеников</small>
               </div>
               <span class="badge ${timing.tone}">${timing.short}</span>
-              <button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Начать урок</button>
+              <button class="button primary compact" data-lesson-report="${lesson.id}" type="button">Сделать отчет</button>
             </div>`)
           .join("")}
       </div>
@@ -1797,7 +1796,7 @@ function scheduleLessonCard(lesson) {
         <small>${occupied}/${capacity} мест</small>
         <div class="row-actions">
           ${isAdmin() ? `<button class="button secondary compact" data-manage-schedule-slots="${lesson.id}" type="button">Слоты</button>` : ""}
-          ${!isParent() ? `<button class="button primary compact" data-start-lesson="${lesson.id}" type="button">Старт</button>` : ""}
+          ${!isParent() ? `<button class="button primary compact" data-lesson-report="${lesson.id}" type="button">Отчет</button>` : ""}
           ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : ""}
         </div>
       </div>
@@ -3054,15 +3053,8 @@ function bindViewActions() {
   document.querySelectorAll("[data-manage-schedule-slots]").forEach((button) => {
     button.addEventListener("click", () => openScheduleSlotsModal(Number(button.dataset.manageScheduleSlots)));
   });
-  document.querySelectorAll("[data-start-lesson]").forEach((button) => {
-    button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.startLesson)));
-  });
-  document.querySelectorAll("[data-resume-lesson]").forEach((button) => {
-    button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.resumeLesson), { keepSession: true }));
-  });
-  document.querySelector("[data-end-active-lesson]")?.addEventListener("click", () => {
-    clearActiveLessonSession();
-    render();
+  document.querySelectorAll("[data-lesson-report]").forEach((button) => {
+    button.addEventListener("click", () => openLessonModeModal(Number(button.dataset.lessonReport)));
   });
   document.querySelectorAll("[data-delete-trial]").forEach((button) => {
     button.addEventListener("click", () => deleteRecord("trial", Number(button.dataset.deleteTrial)));
@@ -4732,25 +4724,21 @@ function openStudentModal(studentId = null) {
   });
 }
 
-function openLessonModeModal(lessonId, options = {}) {
+function openLessonModeModal(lessonId) {
   if (isParent()) return;
   const lesson = visibleSchedule().find((item) => Number(item.id) === Number(lessonId));
   if (!lesson) return;
   const students = studentsForLesson(lesson);
-  if (!options.keepSession) {
-    startLessonSession(lesson, students);
-    render();
-  }
   const today = new Date().toISOString().slice(0, 10);
   const timing = lessonTimingStatus(lesson);
   openModal(
-    `Урок · ${lesson.group}`,
+    `Отчет по уроку · ${lesson.group}`,
     `<form class="lesson-mode" id="lessonModeForm">
       <div class="lesson-mode-hero">
         <div>
-          <span class="badge ${timing.tone}">${timing.short}</span>
+          <span class="badge ${timing.tone}">отчет по расписанию · ${timing.short}</span>
           <h3>${lesson.group} · ${lesson.time}</h3>
-          <p>${lesson.day} · ${lesson.mentor} · ${students.length} учеников</p>
+          <p>${lesson.day} · ${lesson.mentor} · ${students.length} учеников · отметки сразу синхронизируются с табелем</p>
         </div>
         <div class="lesson-mode-score">
           <strong>${lessonReadinessScore(lesson)}%</strong>
@@ -4758,10 +4746,15 @@ function openLessonModeModal(lessonId, options = {}) {
         </div>
       </div>
       <div class="lesson-check-strip">
-        ${lessonMicroCheck("Тема", true)}
-        ${lessonMicroCheck("Посещаемость", students.length > 0)}
-        ${lessonMicroCheck("Фотоотчет", false)}
-        ${lessonMicroCheck("Домашка", false)}
+        ${lessonMicroCheck("Табель", students.length > 0)}
+        ${lessonMicroCheck("НБ", true)}
+        ${lessonMicroCheck("Фидбек", students.length > 0)}
+        ${lessonMicroCheck("Архив", true)}
+      </div>
+      <div class="lesson-report-summary">
+        <div><strong>${students.length}</strong><small>учеников в группе</small></div>
+        <div><strong>${students.filter((student) => subscriptionStatus(student).remaining <= 2).length}</strong><small>к оплате скоро</small></div>
+        <div><strong>${students.filter((student) => subscriptionStatus(student).needsDirectorLetter).length}</strong><small>письмо по НБ</small></div>
       </div>
       <div class="modal-form">
         <label>Дата урока<input name="date" type="date" required value="${today}" /></label>
@@ -4770,8 +4763,8 @@ function openLessonModeModal(lessonId, options = {}) {
       </div>
       <section class="lesson-mode-section">
         <div class="section-title">
-          <strong>Посещаемость</strong>
-          <small>Первые 2 НБ не списываются, дальше логика абонемента сработает автоматически.</small>
+          <strong>Посещаемость и НБ</strong>
+          <small>Выберите «Был» или «НБ». После сохранения отчет сам обновит табель и остаток абонемента.</small>
         </div>
         <div class="lesson-attendance-list">
           ${students.map((student) => lessonStudentRow(student)).join("") || `<div class="empty">В этой группе пока нет учеников</div>`}
@@ -4780,7 +4773,7 @@ function openLessonModeModal(lessonId, options = {}) {
       <section class="lesson-mode-section">
         <div class="section-title">
           <strong>Автофидбек</strong>
-          <small>Выберите короткий статус, CRM сама составит аккуратный комментарий для каждого присутствующего ученика.</small>
+          <small>Фидбек создается для учеников со статусом «Был». Для НБ CRM создаст задачу связаться с родителем.</small>
         </div>
         <div class="lesson-feedback-list">
           ${students.map((student) => lessonFeedbackRow(student)).join("") || `<div class="empty">Нет учеников для фидбека</div>`}
@@ -4811,7 +4804,7 @@ function openLessonModeModal(lessonId, options = {}) {
       </section>
       <div class="form-actions">
         <button class="button ghost" data-close-modal type="button">Отмена</button>
-        <button class="button primary" type="submit">Завершить и сохранить урок</button>
+        <button class="button primary" type="submit">Сохранить отчет и табель</button>
       </div>
     </form>`,
   );
@@ -4826,17 +4819,20 @@ function lessonStudentRow(student) {
   const sub = subscriptionStatus(student);
   const risk = sub.needsPayment ? "payment" : sub.needsDirectorLetter ? "absence" : "";
   return `
-    <label class="lesson-student-row ${risk}">
+    <div class="lesson-student-row ${risk}">
       <span>
         <strong>${student.name}</strong>
         <small>#${sub.currentSubscriptionNumber} · ${sub.visitLabel} · ${sub.remaining} осталось${risk === "payment" ? " · нужна оплата" : ""}${risk === "absence" ? " · письмо по НБ" : ""}</small>
       </span>
-      <select name="attendance-${student.id}">
-        <option value="present">Был</option>
-        <option value="absent">НБ</option>
-        <option value="skip">Не отмечать</option>
-      </select>
-    </label>`;
+      <div class="lesson-status-choice">
+        <input id="present-${student.id}" name="attendance-${student.id}" type="radio" value="present" checked />
+        <label for="present-${student.id}">Был</label>
+        <input id="absent-${student.id}" name="attendance-${student.id}" type="radio" value="absent" />
+        <label for="absent-${student.id}">НБ</label>
+        <input id="skip-${student.id}" name="attendance-${student.id}" type="radio" value="skip" />
+        <label for="skip-${student.id}">-</label>
+      </div>
+    </div>`;
 }
 
 function lessonFeedbackRow(student) {
