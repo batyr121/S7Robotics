@@ -2152,31 +2152,65 @@ td small {
   padding: 18px;
 }
 
+.print-label-pages {
+  display: grid;
+  gap: 18px;
+  padding: 14px;
+  background: #edf4ff;
+}
+
 .print-label-sheet {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  padding: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 794px);
+  aspect-ratio: 210 / 297;
+  margin: 0 auto;
+  padding: 30px;
   background: white;
+  box-shadow: 0 18px 42px rgba(8, 36, 77, 0.12);
 }
 
 .barcode-label {
-  min-height: 168px;
+  min-height: 0;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+  padding: 6px;
   border: 1px dashed #9fb4cf;
   border-radius: 8px;
   page-break-inside: avoid;
   text-align: center;
 }
 
+.barcode-label .inventory-qr {
+  width: 82px;
+  height: 82px;
+}
+
 .barcode-label strong,
 .barcode-label small {
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+.barcode-label strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--blue-950);
+  font-size: 11px;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.barcode-label small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.2;
 }
 
 .inventory-scan {
@@ -3292,12 +3326,19 @@ td small {
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
   body * {
     visibility: hidden;
   }
 
   .certificate-paper,
   .certificate-paper *,
+  .print-label-pages,
+  .print-label-pages *,
   .print-label-sheet,
   .print-label-sheet * {
     visibility: visible;
@@ -3309,22 +3350,54 @@ td small {
     box-shadow: none;
   }
 
-  .print-label-sheet {
-    position: fixed;
-    inset: 8mm;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 5mm;
+  .print-label-pages {
+    position: absolute;
+    inset: 0;
+    display: block;
     padding: 0;
     background: white;
+  }
+
+  .print-label-sheet {
+    position: relative;
+    width: 194mm;
+    height: 281mm;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 3mm;
+    padding: 0;
+    background: white;
+    box-shadow: none;
+    page-break-after: always;
+  }
+
+  .print-label-sheet:last-child {
+    page-break-after: auto;
   }
 
   .barcode-label {
     border: 1px dashed #777;
     border-radius: 0;
+    padding: 2mm;
+  }
+
+  .barcode-label .inventory-qr {
+    width: 26mm;
+    height: 26mm;
+  }
+
+  .barcode-label strong {
+    font-size: 8.5pt;
+  }
+
+  .barcode-label small {
+    font-size: 7.5pt;
   }
 
   .certificate-actions,
+  .label-print-modal > .form-actions,
   .modal-head {
     display: none;
   }

@@ -3607,16 +3607,30 @@ function openInventoryItemModal() {
 
 function openInventoryLabelsModal() {
   const items = state.inventoryItems || [];
+  const pages = chunkArray(items, 20);
   openModal(
-    "Печать QR-этикеток A4",
+    "Печать QR-этикеток A4 · 20 на лист",
     `<div class="label-print-modal">
-      <div class="form-actions"><button class="button primary" data-print-inventory-sheet type="button">Печать A4</button></div>
-      <div class="print-label-sheet">
-        ${items.map((item) => `<article class="barcode-label"><strong>${item.title}</strong>${inventoryQrMarkup(item.code, 118)}<small>${item.code}${item.location ? ` · ${item.location}` : ""}</small></article>`).join("")}
+      <div class="form-actions"><button class="button primary" data-print-inventory-sheet type="button">Печать A4</button><span class="badge neutral">${items.length} QR · ${pages.length || 1} лист.</span></div>
+      <div class="print-label-pages">
+        ${
+          pages
+            .map(
+              (page, index) => `
+                <section class="print-label-sheet" aria-label="Лист ${index + 1}">
+                  ${page.map((item) => `<article class="barcode-label"><strong>${item.title}</strong>${inventoryQrMarkup(item.code, 92)}<small>${item.code}${item.location ? ` · ${item.location}` : ""}</small></article>`).join("")}
+                </section>`,
+            )
+            .join("") || `<div class="empty">Нет оборудования для печати QR.</div>`
+        }
       </div>
     </div>`,
   );
   modalRoot.querySelector("[data-print-inventory-sheet]").addEventListener("click", () => window.print());
+}
+
+function chunkArray(items, size) {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
 }
 
 function openInventoryWriteoffModal() {
