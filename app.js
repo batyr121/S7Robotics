@@ -4,6 +4,8 @@ const API_URL = "api/index.php";
 const TOKEN_KEY = "s7robotics-api-token";
 const LESSON_SESSION_KEY = "s7robotics-active-lesson-v1";
 const QR_DECODER_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+const JSPDF_URL = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
+const QR_GENERATOR_URL = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js";
 const LESSON_DURATION_MINUTES = 90;
 const SEASON_LEVEL_XP = 1000;
 const SEASON_REWARDS = [
@@ -2559,6 +2561,24 @@ function loadQrDecoder() {
   });
 }
 
+function loadExternalScript(src, globalCheck) {
+  if (globalCheck()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 const code39Patterns = {
   "0": "nnnwwnwnn",
   "1": "wnnwnnnnw",
@@ -3609,9 +3629,9 @@ function openInventoryLabelsModal() {
   const items = state.inventoryItems || [];
   const pages = chunkArray(items, 20);
   openModal(
-    "Печать QR-этикеток A4 · 20 на лист",
+    "QR-этикетки PDF · 20 на лист",
     `<div class="label-print-modal">
-      <div class="form-actions"><button class="button primary" data-print-inventory-sheet type="button">Печать A4</button><span class="badge neutral">${items.length} QR · ${pages.length || 1} лист.</span></div>
+      <div class="form-actions"><button class="button primary" data-download-inventory-pdf type="button">Скачать PDF</button><span class="badge neutral">${items.length} QR · ${pages.length || 1} лист.</span></div>
       <div class="print-label-pages">
         ${
           pages
@@ -3626,11 +3646,120 @@ function openInventoryLabelsModal() {
       </div>
     </div>`,
   );
-  modalRoot.querySelector("[data-print-inventory-sheet]").addEventListener("click", () => window.print());
+  modalRoot.querySelector("[data-download-inventory-pdf]").addEventListener("click", (event) => downloadInventoryLabelsPdf(items, event.currentTarget));
 }
 
 function chunkArray(items, size) {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+}
+
+async function downloadInventoryLabelsPdf(items, button) {
+  if (!items.length) return;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Готовлю PDF...";
+  try {
+    await Promise.all([
+      loadExternalScript(JSPDF_URL, () => Boolean(window.jspdf?.jsPDF)),
+      loadExternalScript(QR_GENERATOR_URL, () => Boolean(window.qrcode)),
+    ]);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 8;
+    const gap = 3;
+    const columns = 4;
+    const rows = 5;
+    const perPage = columns * rows;
+    const labelWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+    const labelHeight = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+    const pages = chunkArray(items, perPage);
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+      if (pageIndex > 0) pdf.addPage();
+      for (let itemIndex = 0; itemIndex < pages[pageIndex].length; itemIndex += 1) {
+        const item = pages[pageIndex][itemIndex];
+        const col = itemIndex % columns;
+        const row = Math.floor(itemIndex / columns);
+        const x = margin + col * (labelWidth + gap);
+        const y = margin + row * (labelHeight + gap);
+        const label = await inventoryLabelImage(item);
+        pdf.addImage(label, "PNG", x, y, labelWidth, labelHeight, undefined, "FAST");
+      }
+    }
+    pdf.save(`S7-inventory-QR-${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (error) {
+    alert("PDF не собрался. Проверьте интернет и попробуйте еще раз.");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function inventoryLabelImage(item) {
+  const width = 700;
+  const height = 820;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.setLineDash([12, 10]);
+  ctx.strokeStyle = "#8aa3c2";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(10, 10, width - 20, height - 20);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#08244d";
+  ctx.font = "700 34px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  wrapCanvasText(ctx, item.title || "S7 Robotics", width / 2, 46, width - 80, 40, 2);
+  const qr = window.qrcode(0, "M");
+  qr.addData(String(item.code || "").toUpperCase());
+  qr.make();
+  const qrImage = await loadImage(qr.createDataURL(8, 2));
+  const qrSize = 360;
+  ctx.drawImage(qrImage, (width - qrSize) / 2, 190, qrSize, qrSize);
+  ctx.fillStyle = "#08244d";
+  ctx.font = "800 42px Arial, sans-serif";
+  ctx.fillText(String(item.code || "").toUpperCase(), width / 2, 590);
+  ctx.fillStyle = "#5d7088";
+  ctx.font = "700 25px Arial, sans-serif";
+  wrapCanvasText(ctx, item.location || inventoryCategoryLabel(item.category), width / 2, 650, width - 90, 31, 2);
+  ctx.fillStyle = "#1d6fe8";
+  ctx.font = "800 22px Arial, sans-serif";
+  ctx.fillText("S7 Robotics Inventory", width / 2, 756);
+  return canvas.toDataURL("image/png");
+}
+
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  });
+  if (line) lines.push(line);
+  lines.slice(0, maxLines).forEach((lineText, index) => {
+    const suffix = index === maxLines - 1 && lines.length > maxLines ? "..." : "";
+    ctx.fillText(`${lineText}${suffix}`, x, y + index * lineHeight);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
 }
 
 function openInventoryWriteoffModal() {
