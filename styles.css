@@ -1782,38 +1782,12 @@ td small {
   min-width: 150px;
 }
 
-.attendance-command {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 14px;
-  padding: 16px;
-}
-
-.attendance-command h3,
-.attendance-command p {
-  margin: 6px 0 0;
-}
-
-.attendance-command p {
-  color: var(--muted);
-}
-
-.attendance-date-tools {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .attendance-smart-stats {
   margin-bottom: 14px;
 }
 
 .attendance-table {
-  min-width: 1160px;
+  min-width: 1040px;
 }
 
 .attendance-table th,
@@ -1862,15 +1836,6 @@ td small {
 .mark.absent {
   background: rgba(226, 75, 91, 0.12);
   color: #b02c3b;
-}
-
-.quick-attendance-cell {
-  min-width: 148px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .event-feed {
@@ -3311,7 +3276,6 @@ td small {
   .lesson-archive-row,
   .finance-pulse-row,
   .lesson-mode-hero,
-  .attendance-command,
   .section-title,
   .lesson-student-row,
   .lesson-feedback-row {
@@ -3319,7 +3283,6 @@ td small {
   }
 
   .lesson-mode-hero,
-  .attendance-command,
   .section-title {
     display: grid;
   }
@@ -3506,16 +3469,6 @@ td small {
 
   .eyebrow {
     font-size: 11px;
-  }
-
-  .attendance-date-tools,
-  .quick-attendance-cell {
-    justify-content: stretch;
-  }
-
-  .attendance-date-tools > *,
-  .quick-attendance-cell .button {
-    flex: 1 1 120px;
   }
 
   .event-row {

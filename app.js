@@ -79,7 +79,6 @@ let backendEnabled = false;
 let activeView = "dashboard";
 let searchTerm = "";
 let attendanceGroup = "all";
-let attendanceQuickDate = new Date().toISOString().slice(0, 10);
 let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
 let parentQrScanHandled = false;
 let lessonTimerId = null;
@@ -1553,7 +1552,6 @@ function renderAttendance() {
   if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
   const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
   const records = visibleAttendance();
-  const quickDateLabel = formatDate(attendanceQuickDate);
 
   return `
     <div class="toolbar">
@@ -1571,31 +1569,11 @@ function renderAttendance() {
       </div>
       <span class="badge neutral">${isAdmin() ? "админ видит все группы" : isParent() ? "только дети родителя" : "только мои группы"}</span>
     </div>
-    ${
-      !isParent()
-        ? `<article class="card attendance-command">
-            <div>
-              <span class="badge active">быстрая дата</span>
-              <h3>${quickDateLabel}</h3>
-              <p>Выберите дату и отмечайте учеников кнопками «Был» или «НБ» прямо в строке.</p>
-            </div>
-            <div class="attendance-date-tools">
-              ${quickDateButton("Сегодня", new Date())}
-              ${quickDateButton("Вчера", dateWithOffset(-1))}
-              ${quickDateButton("Суббота", nextWeekdayDate(6))}
-              ${quickDateButton("Воскресенье", nextWeekdayDate(0))}
-              <label class="inline-filter">Дата
-                <input id="attendanceQuickDateInput" type="date" value="${attendanceQuickDate}" />
-              </label>
-            </div>
-          </article>`
-        : ""
-    }
     <div class="stats-grid attendance-smart-stats">
       ${stat("На оплату", students.filter((student) => subscriptionStatus(student).needsPayment).length, "осталось 0-1 занятий")}
       ${stat("2 НБ", students.filter((student) => subscriptionStatus(student).absent === 2).length, "следующая НБ списывается")}
       ${stat("Письмо", students.filter((student) => subscriptionStatus(student).needsDirectorLetter).length, "3+ НБ")}
-      ${stat("Дата", quickDateLabel, "для быстрых отметок")}
+      ${stat("Учеников", students.length, attendanceGroup === "all" ? "все доступные группы" : attendanceGroup)}
     </div>
     <article class="card">
       <div class="card-header">
@@ -1610,7 +1588,6 @@ function renderAttendance() {
               <th>Группа</th>
               <th>Абонемент</th>
               ${Array.from({ length: 8 }, (_, index) => `<th>${index + 1}</th>`).join("")}
-              ${!isParent() ? `<th>${quickDateLabel}</th>` : ""}
               <th>Итого</th>
             </tr>
           </thead>
@@ -1633,7 +1610,6 @@ function renderAttendance() {
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
-                      ${!isParent() ? `<td>${quickAttendanceCell(student, records)}</td>` : ""}
                       <td>
                         <strong>${sub.totalProgressVisits}</strong>
                         <small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small>
@@ -1644,7 +1620,7 @@ function renderAttendance() {
                       </td>
                     </tr>`;
                 })
-                .join("") || `<tr><td colspan="${isParent() ? 12 : 13}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+                .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
             }
           </tbody>
         </table>
@@ -1665,35 +1641,6 @@ function subscriptionBadge(sub) {
       <strong>#${sub.currentSubscriptionNumber}</strong>
       <small>${sub.currentCycleUsed}/8${sub.remaining === 2 ? " · осталось 2" : ""}</small>
     </div>`;
-}
-
-function quickAttendanceCell(student, records) {
-  const record = records.find((item) => Number(item.studentId) === Number(student.id) && item.date === attendanceQuickDate);
-  const status = record?.status;
-  return `
-    <div class="quick-attendance-cell">
-      <span class="mark ${status || "missed"}">${status === "present" ? "Б" : status === "absent" ? "НБ" : "-"}</span>
-      <button class="button primary compact" data-mark-attendance="${student.id}:present" type="button">Был</button>
-      <button class="button ghost compact" data-mark-attendance="${student.id}:absent" type="button">НБ</button>
-    </div>`;
-}
-
-function quickDateButton(label, date) {
-  const value = date.toISOString().slice(0, 10);
-  return `<button class="button ${value === attendanceQuickDate ? "primary" : "ghost"} compact" data-attendance-date="${value}" type="button">${label}</button>`;
-}
-
-function dateWithOffset(offset) {
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  return date;
-}
-
-function nextWeekdayDate(dayIndex) {
-  const date = new Date();
-  const diff = (dayIndex - date.getDay() + 7) % 7;
-  date.setDate(date.getDate() + diff);
-  return date;
 }
 
 function renderSchedule() {
@@ -3016,19 +2963,6 @@ function bindViewActions() {
   document.querySelectorAll("[data-quick-attendance]").forEach((button) => {
     button.addEventListener("click", () => quickMarkAttendance(button.dataset.quickAttendance));
   });
-  document.querySelectorAll("[data-mark-attendance]").forEach((button) => {
-    button.addEventListener("click", () => markAttendanceOnDate(button.dataset.markAttendance));
-  });
-  document.querySelectorAll("[data-attendance-date]").forEach((button) => {
-    button.addEventListener("click", () => {
-      attendanceQuickDate = button.dataset.attendanceDate;
-      render();
-    });
-  });
-  document.querySelector("#attendanceQuickDateInput")?.addEventListener("change", (event) => {
-    attendanceQuickDate = event.target.value || new Date().toISOString().slice(0, 10);
-    render();
-  });
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
@@ -3176,38 +3110,6 @@ async function quickMarkAttendance(payload) {
     return;
   }
   state.attendance.unshift({ ...item, id: Date.now() });
-  syncStudentSubscription(studentId);
-  saveState();
-  render();
-}
-
-async function markAttendanceOnDate(payload) {
-  const [studentIdRaw, status] = String(payload).split(":");
-  const studentId = Number(studentIdRaw);
-  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
-  if (!student || isParent()) return;
-  const item = {
-    studentId,
-    date: attendanceQuickDate,
-    status: status === "absent" ? "absent" : "present",
-    topic: status === "absent" ? "Быстрая НБ" : "Быстрая отметка",
-  };
-  if (backendEnabled) {
-    try {
-      await apiRequest("create_attendance", item);
-      await refreshData();
-    } catch (error) {
-      alert(error.message);
-    }
-    return;
-  }
-  const record = state.attendance.find((entry) => Number(entry.studentId) === studentId && entry.date === attendanceQuickDate);
-  if (record) {
-    record.status = item.status;
-    record.topic = item.topic;
-  } else {
-    state.attendance.unshift({ ...item, id: Date.now() });
-  }
   syncStudentSubscription(studentId);
   saveState();
   render();
