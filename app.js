@@ -7,21 +7,49 @@ const QR_DECODER_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js
 const JSPDF_URL = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
 const QR_GENERATOR_URL = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js";
 const LESSON_DURATION_MINUTES = 90;
-const SEASON_LEVEL_XP = 1000;
-const SEASON_REWARDS = [
-  { level: 1, title: "Старт сезона", text: "цифровой бейдж ученика S7" },
-  { level: 2, title: "5% скидка", text: "на следующий абонемент" },
-  { level: 3, title: "3D принтер", text: "30 минут печати проекта" },
-  { level: 4, title: "Проектный чек", text: "разбор идеи с ментором" },
-  { level: 5, title: "Мастер-класс", text: "закрытый урок по роботам" },
-  { level: 6, title: "S7 мерч", text: "наклейки и карточка инженера" },
-  { level: 7, title: "10% скидка", text: "на абонемент или интенсив" },
-  { level: 8, title: "3D печать+", text: "60 минут на принтере" },
-  { level: 9, title: "Лаб-день", text: "доступ к оборудованию центра" },
-  { level: 10, title: "Консультация", text: "с мастером по проекту" },
-  { level: 11, title: "Семейный бонус", text: "приглашение на демо-день" },
-  { level: 12, title: "Финал сезона", text: "15% скидка и витрина проекта" },
-];
+const DEFAULT_FAMILY_CONFIG = {
+  levelXp: 1000,
+  ranks: [
+    { level: 1, title: "Rookie Engineer", hint: "старт сезона" },
+    { level: 4, title: "Robo Explorer", hint: "активный ученик" },
+    { level: 7, title: "Code Pilot", hint: "уверенный инженер" },
+    { level: 11, title: "Master Builder", hint: "мастер проектов" },
+    { level: 16, title: "S7 Legend", hint: "элитный инженер" },
+  ],
+  rewards: [
+    { level: 1, title: "Старт сезона", text: "цифровой бейдж ученика S7" },
+    { level: 2, title: "5% скидка", text: "на следующий абонемент" },
+    { level: 3, title: "3D принтер", text: "30 минут печати проекта" },
+    { level: 4, title: "Проектный чек", text: "разбор идеи с ментором" },
+    { level: 5, title: "Мастер-класс", text: "закрытый урок по роботам" },
+    { level: 6, title: "S7 мерч", text: "наклейки и карточка инженера" },
+    { level: 7, title: "10% скидка", text: "на абонемент или интенсив" },
+    { level: 8, title: "3D печать+", text: "60 минут на принтере" },
+    { level: 9, title: "Лаб-день", text: "доступ к оборудованию центра" },
+    { level: 10, title: "Консультация", text: "с мастером по проекту" },
+    { level: 11, title: "Семейный бонус", text: "приглашение на демо-день" },
+    { level: 12, title: "Финал сезона", text: "15% скидка и витрина проекта" },
+  ],
+  missions: [
+    { period: "week", title: "2 посещения за неделю", target: "attendance", count: 2, xp: 180 },
+    { period: "week", title: "Семейный отзыв", target: "reviews", count: 1, xp: 120 },
+    { period: "week", title: "Фидбек от ментора", target: "feedback", count: 1, xp: 120 },
+    { period: "month", title: "Прогресс программы", target: "program", count: 25, xp: 160 },
+    { period: "season", title: "Серия активности", target: "attendance", count: 4, xp: 220 },
+    { period: "season", title: "Проектная неделя", target: "combo", count: 1, xp: 200 },
+  ],
+  masterclasses: [
+    { title: "3D-моделирование проекта", date: "каждую пятницу", xp: 900, status: "open" },
+    { title: "LEGO-механизмы / AI и датчики", date: "суббота", xp: 1200, status: "open" },
+    { title: "Демо-день S7", date: "конец месяца", xp: 1500, status: "soon" },
+  ],
+  storeItems: [
+    { title: "Скидка 5%", price: 2500 },
+    { title: "30 минут 3D-принтера", price: 1800 },
+    { title: "Мастер-класс", price: 3200 },
+    { title: "Консультация мастера", price: 4500 },
+  ],
+};
 
 const seed = {
   users: [],
@@ -47,6 +75,7 @@ const seed = {
   methods: [],
   parentReviews: [],
   announcements: [],
+  familyConfig: structuredClone(DEFAULT_FAMILY_CONFIG),
 };
 
 const statusText = {
@@ -119,12 +148,37 @@ function normalizeState(nextState) {
   nextState.methods = nextState.methods || [];
   nextState.parentReviews = nextState.parentReviews || [];
   nextState.announcements = nextState.announcements || [];
+  nextState.familyConfig = normalizeFamilyConfig(nextState.familyConfig);
   nextState.attendance = (nextState.attendance || []).map((item, index) => ({
     id: item.id || Date.now() + index,
     ...item,
     studentId: Number(item.studentId),
   }));
   return nextState;
+}
+
+function normalizeFamilyConfig(config = {}) {
+  const merged = { ...structuredClone(DEFAULT_FAMILY_CONFIG), ...(config || {}) };
+  merged.levelXp = Math.max(100, Number(merged.levelXp || DEFAULT_FAMILY_CONFIG.levelXp));
+  merged.ranks = Array.isArray(merged.ranks) && merged.ranks.length ? merged.ranks : structuredClone(DEFAULT_FAMILY_CONFIG.ranks);
+  merged.rewards = Array.isArray(merged.rewards) && merged.rewards.length ? merged.rewards : structuredClone(DEFAULT_FAMILY_CONFIG.rewards);
+  merged.missions = Array.isArray(merged.missions) && merged.missions.length ? merged.missions : structuredClone(DEFAULT_FAMILY_CONFIG.missions);
+  merged.masterclasses = Array.isArray(merged.masterclasses) && merged.masterclasses.length ? merged.masterclasses : structuredClone(DEFAULT_FAMILY_CONFIG.masterclasses);
+  merged.storeItems = Array.isArray(merged.storeItems) && merged.storeItems.length ? merged.storeItems : structuredClone(DEFAULT_FAMILY_CONFIG.storeItems);
+  merged.ranks = merged.ranks.map((item) => ({ level: Number(item.level || 1), title: item.title || "Ранг", hint: item.hint || "" })).sort((a, b) => a.level - b.level);
+  merged.rewards = merged.rewards.map((item) => ({ level: Number(item.level || 1), title: item.title || "Награда", text: item.text || "" })).sort((a, b) => a.level - b.level);
+  merged.missions = merged.missions.map((item) => ({ period: item.period || "week", title: item.title || "Миссия", target: item.target || "attendance", count: Number(item.count || 1), xp: Number(item.xp || 0) }));
+  merged.masterclasses = merged.masterclasses.map((item) => ({ title: item.title || "Мастер-класс", date: item.date || "по расписанию", xp: Number(item.xp || 0), status: item.status || "open" }));
+  merged.storeItems = merged.storeItems.map((item) => ({ title: item.title || "Награда", price: Number(item.price || 0) }));
+  return merged;
+}
+
+function familyConfig() {
+  return normalizeFamilyConfig(state.familyConfig);
+}
+
+function seasonLevelXp() {
+  return familyConfig().levelXp;
 }
 
 function saveState() {
@@ -1086,7 +1140,7 @@ function renderFamilyBadgeDashboard() {
       </div>
       <div class="family-level-card">
         <strong>${stats.level}</strong>
-        <small>${stats.xp} XP · ${stats.levelXp}/${SEASON_LEVEL_XP}</small>
+        <small>${stats.xp} XP · ${stats.levelXp}/${seasonLevelXp()}</small>
       </div>
     </section>
     <div class="stats-grid family-stats">
@@ -1136,10 +1190,7 @@ function renderFamilyBadgeDashboard() {
       <article class="card">
         <div class="card-header"><h3>XP Store</h3><span class="badge neutral">скоро</span></div>
         <div class="family-store">
-          ${familyStoreItem("Скидка 5%", 2500, stats.xp)}
-          ${familyStoreItem("30 минут 3D-принтера", 1800, stats.xp)}
-          ${familyStoreItem("Мастер-класс", 3200, stats.xp)}
-          ${familyStoreItem("Консультация мастера", 4500, stats.xp)}
+          ${familyConfig().storeItems.map((item) => familyStoreItem(item.title, item.price, stats.xp)).join("")}
         </div>
       </article>
     </div>
@@ -1153,20 +1204,11 @@ function renderFamilyBadgeDashboard() {
 }
 
 function childRank(level) {
-  if (level >= 16) return { title: "S7 Legend", hint: "элитный инженер" };
-  if (level >= 11) return { title: "Master Builder", hint: "мастер проектов" };
-  if (level >= 7) return { title: "Code Pilot", hint: "уверенный инженер" };
-  if (level >= 4) return { title: "Robo Explorer", hint: "активный ученик" };
-  return { title: "Rookie Engineer", hint: "старт сезона" };
+  return [...familyConfig().ranks].sort((a, b) => b.level - a.level).find((rank) => level >= rank.level) || DEFAULT_FAMILY_CONFIG.ranks[0];
 }
 
 function familyMasterclasses(student) {
-  const track = programTrack(student);
-  return [
-    { title: "3D-моделирование проекта", date: "каждую пятницу", xp: 900, status: "open" },
-    { title: track === "B" ? "AI и датчики робота" : "LEGO-механизмы", date: "суббота", xp: 1200, status: "open" },
-    { title: "Демо-день S7", date: "конец месяца", xp: 1500, status: "soon" },
-  ];
+  return familyConfig().masterclasses;
 }
 
 function familyMasterclassRow(item) {
@@ -2203,6 +2245,7 @@ function renderParentPortal() {
       ${isParent() ? `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>` : ""}
       ${isParent() ? `<button class="button secondary" data-edit-profile type="button">Редактировать профиль</button>` : ""}
       ${isAdmin() ? `<button class="button secondary" data-add-announcement type="button">+ Новость / скидка</button>` : ""}
+      ${isAdmin() ? `<button class="button primary" data-edit-family-config type="button">Настройки пропуска</button>` : ""}
       <span class="badge neutral">семейный кабинет</span>
     </div>
     <div class="module-grid">
@@ -2223,11 +2266,11 @@ function renderParentPortal() {
       ${students.map((student) => parentStudentCard(student)).join("") || `<div class="empty">Админ еще не привязал детей к аккаунту родителя.</div>`}
     </div>
     <article class="card">
-      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">1000 XP за уровень</span></div>
+      <div class="card-header"><h3>Сезонный пропуск S7</h3><span class="badge soon">${seasonLevelXp()} XP за уровень</span></div>
       <div class="weekly-pass">
         <div>
           <span>Сезонный уровень ${season.level}</span>
-          <strong>${season.levelXp}/${SEASON_LEVEL_XP} XP до следующего уровня</strong>
+          <strong>${season.levelXp}/${seasonLevelXp()} XP до следующего уровня</strong>
           <small>Неделя ${weekly.week} · ${season.totalXp} XP всего · ${season.nextReward ? `следующая награда: ${season.nextReward.title}` : "главная награда сезона открыта"}</small>
         </div>
         <div class="weekly-meter" aria-label="Заполнение сезонного пропуска">
@@ -2243,7 +2286,7 @@ function renderParentPortal() {
         ${weekly.missions.map((mission) => missionRow(mission)).join("")}
       </div>
       <div class="season-pass">
-        ${SEASON_REWARDS.map((reward) => seasonReward(reward, season.level)).join("")}
+        ${familyConfig().rewards.map((reward) => seasonReward(reward, season.level)).join("")}
       </div>
     </article>
   `;
@@ -2277,7 +2320,7 @@ function parentStudentCard(student) {
       <div class="child-level-panel">
         <div>
           <strong>Прогресс уровня</strong>
-          <small>${stats.levelXp}/${SEASON_LEVEL_XP} XP · осталось ${stats.xpToNext} XP</small>
+          <small>${stats.levelXp}/${seasonLevelXp()} XP · осталось ${stats.xpToNext} XP</small>
         </div>
         <div class="weekly-meter" aria-label="Прогресс уровня ученика">
           <span style="width:${stats.levelPercent}%"></span>
@@ -2326,16 +2369,13 @@ function childGamification(student) {
   const streak = attendance.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).length;
   const streakBonus = Math.min(streak, 10) * 25;
   const xp = attendance.length * 120 + feedback.length * 80 + reviews.length * 100 + Number(student.progress || 0) * 8 + streakBonus;
-  const level = Math.min(20, Math.max(1, Math.floor(xp / SEASON_LEVEL_XP) + 1));
-  const levelXp = xp % SEASON_LEVEL_XP;
-  const levelPercent = Math.round((levelXp / SEASON_LEVEL_XP) * 100);
-  const xpToNext = level >= 20 ? 0 : SEASON_LEVEL_XP - levelXp;
-  const missions = [
-    dailyTask("Посетить урок", attendance.length > 0, `${attendance.length} посещений · +120 XP`),
-    dailyTask("Получить фидбек", feedback.length > 0, `${feedback.length} заметок · +80 XP`),
-    dailyTask("Оставить отзыв", reviews.length > 0, `${reviews.length} отзывов · +100 XP`),
-    dailyTask("Закрыть модуль", program.completed >= 8, `${program.completed}/${program.total} уроков · бонус`),
-  ];
+  const levelXpTarget = seasonLevelXp();
+  const maxLevel = Math.max(20, ...familyConfig().ranks.map((rank) => rank.level));
+  const level = Math.min(maxLevel, Math.max(1, Math.floor(xp / levelXpTarget) + 1));
+  const levelXp = xp % levelXpTarget;
+  const levelPercent = Math.round((levelXp / levelXpTarget) * 100);
+  const xpToNext = level >= maxLevel ? 0 : levelXpTarget - levelXp;
+  const missions = familyConfig().missions.slice(0, 6).map((mission) => studentMissionProgress(mission, { attendance, feedback, reviews, program }));
   const achievements = [
     achievement("Первый робот", attendance.length >= 1, "первый урок в сезоне"),
     achievement("Стабильный инженер", attendance.length >= 4, "4 урока в программе"),
@@ -2345,6 +2385,20 @@ function childGamification(student) {
     achievement("Проектный финиш", program.completed >= 34, "закрыть программу A/B"),
   ];
   return { xp, level, levelXp, levelPercent, xpToNext, streak, missions, achievements };
+}
+
+function studentMissionProgress(mission, context) {
+  const value = missionValue(mission, context);
+  const done = value >= Number(mission.count || 1);
+  return dailyTask(mission.title, done, `${Math.min(value, mission.count)}/${mission.count} · +${mission.xp} XP`);
+}
+
+function missionValue(mission, context) {
+  if (mission.target === "reviews") return context.reviews.length;
+  if (mission.target === "feedback") return context.feedback.length;
+  if (mission.target === "program") return context.program.percent;
+  if (mission.target === "combo") return context.feedback.length >= 2 && context.reviews.length >= 1 ? 1 : 0;
+  return context.attendance.length;
 }
 
 function announcementRow(item) {
@@ -2385,20 +2439,20 @@ function weeklyPassProgress() {
   const avgProgram = students.length
     ? Math.round(students.reduce((sum, student) => sum + programProgress(student).percent, 0) / students.length)
     : 0;
-  const missions = [
-    dailyTask("2 посещения за неделю", attendance.length >= 2, `${Math.min(attendance.length, 2)}/2 · +180 XP`),
-    dailyTask("Семейный отзыв", reviews.length >= 1, `${reviews.length} отзывов · +120 XP`),
-    dailyTask("Фидбек от ментора", feedback.length >= 1, `${feedback.length} заметок · +120 XP`),
-    dailyTask("Прогресс программы", avgProgram >= 25, `${avgProgram}% среднего пути · +160 XP`),
-    dailyTask("Серия активности", attendance.length >= 4, `${Math.min(attendance.length, 4)}/4 уроков · +220 XP`),
-    dailyTask("Проектная неделя", feedback.length >= 2 && reviews.length >= 1, `${feedback.length} фидбеков и ${reviews.length} отзывов · +200 XP`),
-  ];
-  const missionXp = [180, 120, 120, 160, 220, 200];
+  const missions = familyConfig().missions.map((mission) => {
+    const value = missionValue(mission, { attendance, feedback, reviews, program: { percent: avgProgram } });
+    const done = value >= mission.count;
+    return { ...dailyTask(`${mission.title} · ${missionPeriodLabel(mission.period)}`, done, `${Math.min(value, mission.count)}/${mission.count} · +${mission.xp} XP`), xp: mission.xp };
+  });
   const done = missions.filter((mission) => mission.done).length;
   const total = missions.length;
   const percent = Math.round((done / total) * 100);
-  const earnedXp = missions.reduce((sum, mission, index) => sum + (mission.done ? missionXp[index] : 0), 0);
+  const earnedXp = missions.reduce((sum, mission) => sum + (mission.done ? Number(mission.xp || 0) : 0), 0);
   return { week, missions, done, total, percent, earnedXp };
+}
+
+function missionPeriodLabel(period) {
+  return { week: "неделя", month: "месяц", season: "сезон" }[period] || "миссия";
 }
 
 function seasonPassProgress(weekly = weeklyPassProgress()) {
@@ -2407,11 +2461,13 @@ function seasonPassProgress(weekly = weeklyPassProgress()) {
   const childXp = students.reduce((sum, student) => sum + childGamification(student).xp, 0);
   const reviewBonus = reviews.reduce((sum, item) => sum + Number(item.bonusPoints || 0), 0);
   const totalXp = childXp + reviewBonus + weekly.earnedXp;
-  const maxLevel = SEASON_REWARDS[SEASON_REWARDS.length - 1].level;
-  const level = Math.min(maxLevel, Math.max(1, Math.floor(totalXp / SEASON_LEVEL_XP) + 1));
-  const levelXp = level >= maxLevel ? SEASON_LEVEL_XP : totalXp % SEASON_LEVEL_XP;
-  const percent = Math.round((levelXp / SEASON_LEVEL_XP) * 100);
-  const nextReward = SEASON_REWARDS.find((reward) => reward.level > level) || null;
+  const rewards = familyConfig().rewards;
+  const levelXpTarget = seasonLevelXp();
+  const maxLevel = Math.max(1, ...rewards.map((reward) => reward.level));
+  const level = Math.min(maxLevel, Math.max(1, Math.floor(totalXp / levelXpTarget) + 1));
+  const levelXp = level >= maxLevel ? levelXpTarget : totalXp % levelXpTarget;
+  const percent = Math.round((levelXp / levelXpTarget) * 100);
+  const nextReward = rewards.find((reward) => reward.level > level) || null;
   return { totalXp, level, levelXp, percent, nextReward };
 }
 
@@ -3180,6 +3236,7 @@ function bindViewActions() {
   document.querySelector("[data-add-certificate]")?.addEventListener("click", () => openCertificateModal());
   document.querySelector("[data-add-parent-review]")?.addEventListener("click", () => openParentReviewModal());
   document.querySelector("[data-add-announcement]")?.addEventListener("click", () => openAnnouncementModal());
+  document.querySelector("[data-edit-family-config]")?.addEventListener("click", () => openFamilyConfigModal());
   document.querySelector("[data-print-attendance]")?.addEventListener("click", printAttendanceSheet);
   document.querySelector("[data-export-attendance]")?.addEventListener("click", exportAttendanceCsv);
   document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
@@ -6096,6 +6153,70 @@ function openAnnouncementModal() {
     closeModal();
     render();
   });
+}
+
+function openFamilyConfigModal() {
+  if (!isAdmin()) return;
+  const config = familyConfig();
+  openModal(
+    "Настройки пропуска",
+    `<form class="modal-form family-config-form" id="familyConfigForm">
+      <label>XP за уровень<input name="levelXp" type="number" min="100" step="50" value="${config.levelXp}" /></label>
+      <label style="grid-column:1/-1">Ранги ученика<textarea name="ranks" rows="5">${escapeHtml(formatPipeLines(config.ranks, ["level", "title", "hint"]))}</textarea></label>
+      <label style="grid-column:1/-1">Подарки уровней пропуска<textarea name="rewards" rows="8">${escapeHtml(formatPipeLines(config.rewards, ["level", "title", "text"]))}</textarea></label>
+      <label style="grid-column:1/-1">Миссии недели / месяца / сезона<textarea name="missions" rows="7">${escapeHtml(formatPipeLines(config.missions, ["period", "title", "target", "count", "xp"]))}</textarea></label>
+      <label style="grid-column:1/-1">Мастер-классы<textarea name="masterclasses" rows="5">${escapeHtml(formatPipeLines(config.masterclasses, ["title", "date", "xp", "status"]))}</textarea></label>
+      <label style="grid-column:1/-1">Магазин бонусов<textarea name="storeItems" rows="5">${escapeHtml(formatPipeLines(config.storeItems, ["title", "price"]))}</textarea></label>
+      <div class="form-alert" style="grid-column:1/-1">
+        Формат строк: ранги <b>уровень | название | подсказка</b>, подарки <b>уровень | подарок | описание</b>,
+        миссии <b>period | название | target | цель | XP</b>. period: week/month/season, target: attendance/reviews/feedback/program/combo.
+      </div>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сохранить настройки</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#familyConfigForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const configPayload = normalizeFamilyConfig({
+      levelXp: Number(form.elements.levelXp.value || 1000),
+      ranks: parsePipeLines(form.elements.ranks.value, ["level", "title", "hint"], ["level"]),
+      rewards: parsePipeLines(form.elements.rewards.value, ["level", "title", "text"], ["level"]),
+      missions: parsePipeLines(form.elements.missions.value, ["period", "title", "target", "count", "xp"], ["count", "xp"]),
+      masterclasses: parsePipeLines(form.elements.masterclasses.value, ["title", "date", "xp", "status"], ["xp"]),
+      storeItems: parsePipeLines(form.elements.storeItems.value, ["title", "price"], ["price"]),
+    });
+    if (backendEnabled) {
+      await apiRequest("update_family_config", { config: configPayload });
+      closeModal();
+      await refreshData();
+      return;
+    }
+    state.familyConfig = configPayload;
+    saveState();
+    closeModal();
+    render();
+  });
+}
+
+function formatPipeLines(items, fields) {
+  return (items || []).map((item) => fields.map((field) => item[field] ?? "").join(" | ")).join("\n");
+}
+
+function parsePipeLines(text, fields, numberFields = []) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|").map((part) => part.trim());
+      return fields.reduce((item, field, index) => {
+        item[field] = numberFields.includes(field) ? Number(parts[index] || 0) : parts[index] || "";
+        return item;
+      }, {});
+    });
 }
 
 function studentSelectField(students = visibleStudents(), selectedStudentId = null) {

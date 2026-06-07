@@ -82,6 +82,7 @@ try {
         'delete_inventory_item' => delete_simple($pdo, require_admin($pdo), $input, 'inventory_items'),
         'create_inventory_audit' => create_inventory_audit($pdo, require_user($pdo), $input),
         'create_inventory_writeoff' => create_inventory_writeoff($pdo, require_admin($pdo), $input),
+        'update_family_config' => update_family_config($pdo, require_admin($pdo), $input),
         default => fail('Unknown action', 404),
     };
 } catch (Throwable $error) {
@@ -350,6 +351,11 @@ function init_db(PDO $pdo): void
             date text not null,
             created_by text not null,
             created_at text not null default current_timestamp
+        );
+        create table if not exists app_config (
+            key text primary key,
+            value_json text not null,
+            updated_at text not null default current_timestamp
         );
     ");
     migrate_users_role_check($pdo);
@@ -1510,6 +1516,17 @@ function create_inventory_writeoff(PDO $pdo, array $admin, array $input): void
     data_response($pdo, $admin);
 }
 
+function update_family_config(PDO $pdo, array $admin, array $input): void
+{
+    $config = is_array($input['config'] ?? null) ? normalize_family_config($input['config']) : default_family_config();
+    $stmt = $pdo->prepare("
+        insert into app_config (key, value_json, updated_at) values (?, ?, current_timestamp)
+        on conflict(key) do update set value_json = excluded.value_json, updated_at = current_timestamp
+    ");
+    $stmt->execute(['family_config', json_encode($config, JSON_UNESCAPED_UNICODE)]);
+    data_response($pdo, $admin);
+}
+
 function delete_simple(PDO $pdo, array $admin, array $input, string $table): void
 {
     $allowed = ['schedule', 'salaries', 'methods', 'announcements', 'expenses', 'planned_expenses', 'trial_lessons', 'certificates', 'inventory_items'];
@@ -1554,7 +1571,100 @@ function state_for_user(PDO $pdo, array $user): array
         'inventoryItems' => $isParent ? [] : all_inventory_items($pdo),
         'inventoryAudits' => $isParent ? [] : ($isAdmin ? all_inventory_audits($pdo) : mentor_inventory_audits($pdo, $user)),
         'inventoryWriteoffs' => $isAdmin ? all_inventory_writeoffs($pdo) : [],
+        'familyConfig' => family_config($pdo),
     ];
+}
+
+function default_family_config(): array
+{
+    return [
+        'levelXp' => 1000,
+        'ranks' => [
+            ['level' => 1, 'title' => 'Rookie Engineer', 'hint' => 'старт сезона'],
+            ['level' => 4, 'title' => 'Robo Explorer', 'hint' => 'активный ученик'],
+            ['level' => 7, 'title' => 'Code Pilot', 'hint' => 'уверенный инженер'],
+            ['level' => 11, 'title' => 'Master Builder', 'hint' => 'мастер проектов'],
+            ['level' => 16, 'title' => 'S7 Legend', 'hint' => 'элитный инженер'],
+        ],
+        'rewards' => [
+            ['level' => 1, 'title' => 'Старт сезона', 'text' => 'цифровой бейдж ученика S7'],
+            ['level' => 2, 'title' => '5% скидка', 'text' => 'на следующий абонемент'],
+            ['level' => 3, 'title' => '3D принтер', 'text' => '30 минут печати проекта'],
+            ['level' => 4, 'title' => 'Проектный чек', 'text' => 'разбор идеи с ментором'],
+            ['level' => 5, 'title' => 'Мастер-класс', 'text' => 'закрытый урок по роботам'],
+            ['level' => 6, 'title' => 'S7 мерч', 'text' => 'наклейки и карточка инженера'],
+            ['level' => 7, 'title' => '10% скидка', 'text' => 'на абонемент или интенсив'],
+            ['level' => 8, 'title' => '3D печать+', 'text' => '60 минут на принтере'],
+            ['level' => 9, 'title' => 'Лаб-день', 'text' => 'доступ к оборудованию центра'],
+            ['level' => 10, 'title' => 'Консультация', 'text' => 'с мастером по проекту'],
+            ['level' => 11, 'title' => 'Семейный бонус', 'text' => 'приглашение на демо-день'],
+            ['level' => 12, 'title' => 'Финал сезона', 'text' => '15% скидка и витрина проекта'],
+        ],
+        'missions' => [
+            ['period' => 'week', 'title' => '2 посещения за неделю', 'target' => 'attendance', 'count' => 2, 'xp' => 180],
+            ['period' => 'week', 'title' => 'Семейный отзыв', 'target' => 'reviews', 'count' => 1, 'xp' => 120],
+            ['period' => 'week', 'title' => 'Фидбек от ментора', 'target' => 'feedback', 'count' => 1, 'xp' => 120],
+            ['period' => 'month', 'title' => 'Прогресс программы', 'target' => 'program', 'count' => 25, 'xp' => 160],
+            ['period' => 'season', 'title' => 'Серия активности', 'target' => 'attendance', 'count' => 4, 'xp' => 220],
+            ['period' => 'season', 'title' => 'Проектная неделя', 'target' => 'combo', 'count' => 1, 'xp' => 200],
+        ],
+        'masterclasses' => [
+            ['title' => '3D-моделирование проекта', 'date' => 'каждую пятницу', 'xp' => 900, 'status' => 'open'],
+            ['title' => 'LEGO-механизмы / AI и датчики', 'date' => 'суббота', 'xp' => 1200, 'status' => 'open'],
+            ['title' => 'Демо-день S7', 'date' => 'конец месяца', 'xp' => 1500, 'status' => 'soon'],
+        ],
+        'storeItems' => [
+            ['title' => 'Скидка 5%', 'price' => 2500],
+            ['title' => '30 минут 3D-принтера', 'price' => 1800],
+            ['title' => 'Мастер-класс', 'price' => 3200],
+            ['title' => 'Консультация мастера', 'price' => 4500],
+        ],
+    ];
+}
+
+function family_config(PDO $pdo): array
+{
+    $stmt = $pdo->prepare('select value_json from app_config where key = ?');
+    $stmt->execute(['family_config']);
+    $value = $stmt->fetchColumn();
+    $decoded = $value ? json_decode((string)$value, true) : [];
+    return normalize_family_config(is_array($decoded) ? $decoded : []);
+}
+
+function normalize_family_config(array $config): array
+{
+    $default = default_family_config();
+    $result = [
+        'levelXp' => max(100, (int)($config['levelXp'] ?? $default['levelXp'])),
+        'ranks' => normalize_config_items($config['ranks'] ?? $default['ranks'], $default['ranks'], ['level'], ['title', 'hint']),
+        'rewards' => normalize_config_items($config['rewards'] ?? $default['rewards'], $default['rewards'], ['level'], ['title', 'text']),
+        'missions' => normalize_config_items($config['missions'] ?? $default['missions'], $default['missions'], ['count', 'xp'], ['period', 'title', 'target']),
+        'masterclasses' => normalize_config_items($config['masterclasses'] ?? $default['masterclasses'], $default['masterclasses'], ['xp'], ['title', 'date', 'status']),
+        'storeItems' => normalize_config_items($config['storeItems'] ?? $default['storeItems'], $default['storeItems'], ['price'], ['title']),
+    ];
+    usort($result['ranks'], fn($a, $b) => ($a['level'] ?? 1) <=> ($b['level'] ?? 1));
+    usort($result['rewards'], fn($a, $b) => ($a['level'] ?? 1) <=> ($b['level'] ?? 1));
+    return $result;
+}
+
+function normalize_config_items(mixed $items, array $fallback, array $numberKeys, array $textKeys): array
+{
+    if (!is_array($items) || !$items) return $fallback;
+    $normalized = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) continue;
+        $row = [];
+        foreach ($numberKeys as $key) {
+            $row[$key] = max(0, (int)($item[$key] ?? 0));
+        }
+        foreach ($textKeys as $key) {
+            $row[$key] = trim((string)($item[$key] ?? ''));
+        }
+        if (trim(implode('', array_map('strval', $row))) !== '') {
+            $normalized[] = $row;
+        }
+    }
+    return $normalized ?: $fallback;
 }
 
 function all_users(PDO $pdo): array

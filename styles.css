@@ -3256,6 +3256,13 @@ td small {
   resize: vertical;
 }
 
+.family-config-form textarea {
+  min-height: 132px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .form-actions {
   grid-column: 1 / -1;
   display: flex;
