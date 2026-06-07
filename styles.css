@@ -1052,6 +1052,85 @@ select {
   padding: 0 18px 14px;
 }
 
+.family-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 24px;
+  border: 1px solid rgba(29, 111, 232, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 86% 14%, rgba(18, 168, 122, 0.18), transparent 30%),
+    linear-gradient(135deg, #ffffff, #eaf4ff);
+  box-shadow: 0 18px 46px rgba(8, 36, 77, 0.11);
+}
+
+.family-hero h2 {
+  margin: 10px 0 4px;
+  color: var(--blue-950);
+  font-size: 38px;
+}
+
+.family-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.family-level-card {
+  width: 132px;
+  height: 132px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue-600), var(--green));
+  color: white;
+}
+
+.family-level-card strong {
+  font-size: 42px;
+}
+
+.family-level-card small {
+  max-width: 92px;
+  text-align: center;
+  font-weight: 850;
+}
+
+.family-grid {
+  margin-bottom: 14px;
+}
+
+.family-store {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.store-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.store-item.available {
+  border-color: rgba(18, 168, 122, 0.24);
+  background: rgba(18, 168, 122, 0.08);
+}
+
+.store-item small {
+  color: var(--muted);
+  font-weight: 850;
+}
+
 .child-level-panel,
 .program-panel {
   display: grid;
@@ -3276,6 +3355,8 @@ td small {
   .lesson-archive-row,
   .finance-pulse-row,
   .lesson-mode-hero,
+  .family-hero,
+  .store-item,
   .section-title,
   .lesson-student-row,
   .lesson-feedback-row {
@@ -3283,6 +3364,7 @@ td small {
   }
 
   .lesson-mode-hero,
+  .family-hero,
   .section-title {
     display: grid;
   }

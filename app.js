@@ -82,6 +82,7 @@ let attendanceGroup = "all";
 let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
 let parentQrScanHandled = false;
 let lessonTimerId = null;
+let familyMode = false;
 
 function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -167,6 +168,7 @@ function applyAuthResponse(data) {
   if (data.token) {
     localStorage.setItem(TOKEN_KEY, data.token);
   }
+  familyMode = Boolean(data.familyMode);
   currentUser = data.user;
   state = normalizeState({ ...structuredClone(seed), ...data.state });
   activeView = "dashboard";
@@ -181,9 +183,10 @@ function setSession(user) {
 }
 
 function logout() {
-  if (backendEnabled) {
+  if (backendEnabled && !familyMode) {
     apiRequest("logout").catch(() => {});
   }
+  familyMode = false;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(SESSION_KEY);
   clearActiveLessonSession();
@@ -765,7 +768,7 @@ function renderShell() {
   currentUserRole.textContent = isAdmin()
     ? "Админ"
     : isParent()
-      ? `Родитель · ${visibleStudents().length} детей`
+      ? `${familyMode ? "Семейный QR" : "Родитель"} · ${visibleStudents().length} детей`
       : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
   if (heroBand) heroBand.hidden = isParent();
   if (pendingParentQrScan && isParent() && !parentQrScanHandled) activeView = "parent";
@@ -1010,6 +1013,7 @@ function renderDashboard() {
 }
 
 function renderParentDashboard() {
+  if (familyMode) return renderFamilyBadgeDashboard();
   const absenceNotifications = visibleStudents()
     .map((student) => ({ student, sub: subscriptionStatus(student) }))
     .filter(({ sub }) => sub.needsDirectorLetter);
@@ -1060,6 +1064,117 @@ function renderParentDashboard() {
       </article>
     </div>
   `;
+}
+
+function renderFamilyBadgeDashboard() {
+  const student = visibleStudents()[0];
+  if (!student) return `<div class="empty">Бейдж не найден или больше не активен.</div>`;
+  const sub = subscriptionStatus(student);
+  const stats = childGamification(student);
+  const rank = childRank(stats.level);
+  const program = programProgress(student);
+  const schedule = visibleSchedule().filter((lesson) => lesson.group === student.group);
+  const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 8);
+  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 3);
+  const masterclasses = familyMasterclasses(student);
+  return `
+    <section class="family-hero">
+      <div>
+        <span class="badge active">S7 Robotics Family Pass</span>
+        <h2>${student.name}</h2>
+        <p>${program.title} · ${student.group} · ${rank.title}</p>
+      </div>
+      <div class="family-level-card">
+        <strong>${stats.level}</strong>
+        <small>${stats.xp} XP · ${stats.levelXp}/${SEASON_LEVEL_XP}</small>
+      </div>
+    </section>
+    <div class="stats-grid family-stats">
+      ${stat("Абонемент", sub.visitLabel, `${sub.remaining} осталось`)}
+      ${stat("Ранг", rank.title, rank.hint)}
+      ${stat("Программа", `${program.completed}/34`, `${program.percent}% пути`)}
+      ${stat("Рейтинг", `${Math.min(100, 40 + stats.level * 3 + program.completed)}%`, "активность ученика")}
+    </div>
+    <div class="module-grid family-grid">
+      <article class="card">
+        <div class="card-header"><h3>Уровень и XP</h3><span class="badge active">${rank.title}</span></div>
+        <div class="child-level-panel">
+          <div>
+            <strong>До следующего уровня</strong>
+            <small>${stats.xpToNext} XP · уровень ${stats.level}</small>
+          </div>
+          <div class="weekly-meter"><span style="width:${stats.levelPercent}%"></span></div>
+        </div>
+        <div class="weekly-missions">${stats.missions.map((mission) => missionRow(mission)).join("")}</div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Мастер-классы</h3><span class="badge soon">запись</span></div>
+        <div class="card-body list">
+          ${masterclasses.map((item) => familyMasterclassRow(item)).join("")}
+        </div>
+      </article>
+    </div>
+    <div class="module-grid family-grid">
+      <article class="card">
+        <div class="card-header"><h3>Посещения</h3><span class="badge neutral">${attendance.length}</span></div>
+        <div class="card-body list">
+          ${attendance.map((item) => `<div class="list-row"><strong>${formatDate(item.date)}</strong><small>${statusText[item.status]} · ${item.topic}</small></div>`).join("") || `<div class="empty">Пока нет отметок</div>`}
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>Расписание</h3><span class="badge neutral">${student.group}</span></div>
+        <div class="card-body list">
+          ${schedule.map((lesson) => `<div class="list-row"><strong>${lesson.day} · ${lesson.time}</strong><small>${lesson.group} · ${lesson.mentor}</small></div>`).join("") || `<div class="empty">Расписание появится после настройки группы</div>`}
+        </div>
+      </article>
+    </div>
+    <div class="module-grid family-grid">
+      <article class="card">
+        <div class="card-header"><h3>Новости и бонусы</h3><span class="badge active">live</span></div>
+        <div class="card-body list">${announcementList()}</div>
+      </article>
+      <article class="card">
+        <div class="card-header"><h3>XP Store</h3><span class="badge neutral">скоро</span></div>
+        <div class="family-store">
+          ${familyStoreItem("Скидка 5%", 2500, stats.xp)}
+          ${familyStoreItem("30 минут 3D-принтера", 1800, stats.xp)}
+          ${familyStoreItem("Мастер-класс", 3200, stats.xp)}
+          ${familyStoreItem("Консультация мастера", 4500, stats.xp)}
+        </div>
+      </article>
+    </div>
+    <article class="card">
+      <div class="card-header"><h3>Фидбек ментора</h3><span class="badge neutral">${feedback.length}</span></div>
+      <div class="card-body list">
+        ${feedback.map((note) => `<div class="feedback-note"><strong>${note.skill}</strong><small>${note.mentor} · ${formatDate(note.date)}</small><p>${note.text}</p></div>`).join("") || `<div class="empty">Фидбек появится после уроков</div>`}
+      </div>
+    </article>
+  `;
+}
+
+function childRank(level) {
+  if (level >= 16) return { title: "S7 Legend", hint: "элитный инженер" };
+  if (level >= 11) return { title: "Master Builder", hint: "мастер проектов" };
+  if (level >= 7) return { title: "Code Pilot", hint: "уверенный инженер" };
+  if (level >= 4) return { title: "Robo Explorer", hint: "активный ученик" };
+  return { title: "Rookie Engineer", hint: "старт сезона" };
+}
+
+function familyMasterclasses(student) {
+  const track = programTrack(student);
+  return [
+    { title: "3D-моделирование проекта", date: "каждую пятницу", xp: 900, status: "open" },
+    { title: track === "B" ? "AI и датчики робота" : "LEGO-механизмы", date: "суббота", xp: 1200, status: "open" },
+    { title: "Демо-день S7", date: "конец месяца", xp: 1500, status: "soon" },
+  ];
+}
+
+function familyMasterclassRow(item) {
+  return `<div class="list-row"><div><strong>${item.title}</strong><small>${item.date} · бонус ${item.xp} XP</small></div><span class="badge ${item.status === "open" ? "active" : "soon"}">${item.status === "open" ? "можно записаться" : "скоро"}</span></div>`;
+}
+
+function familyStoreItem(title, price, xp) {
+  return `<div class="store-item ${xp >= price ? "available" : ""}"><strong>${title}</strong><small>${price} XP</small><span class="badge ${xp >= price ? "active" : "neutral"}">${xp >= price ? "доступно" : "копим"}</span></div>`;
 }
 
 function crmEventFeed(limit = Infinity) {
@@ -1484,6 +1599,7 @@ function renderStudents() {
     <div class="toolbar">
       <div class="filters">
         ${isAdmin() ? `<button class="button primary" data-add-student type="button">+ Ученик</button>` : ""}
+        ${isAdmin() ? `<button class="button secondary" data-download-student-badges type="button">PDF бейджи</button>` : ""}
         ${isAdmin() ? `<button class="button ghost" data-reset-demo type="button">Сброс демо</button>` : ""}
       </div>
       <span class="badge neutral">${students.length} записей</span>
@@ -1557,6 +1673,7 @@ function renderAttendance() {
     <div class="toolbar">
       <div class="filters">
         ${!isParent() ? `<button class="button primary" data-add-attendance type="button">+ Отметка</button>` : ""}
+        ${!isParent() ? `<button class="button secondary" data-scan-student-badges type="button">Скан бейджей</button>` : ""}
         ${!isParent() ? `<button class="button secondary" data-unified-qr type="button">Единый QR</button>` : `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>`}
         <button class="button secondary" data-print-attendance type="button">Печать ведомости</button>
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
@@ -2980,6 +3097,7 @@ function bindViewActions() {
     button.addEventListener("click", () => openParentMessagesModal(Number(button.dataset.parentMessages)));
   });
   document.querySelector("[data-add-student]")?.addEventListener("click", openStudentModal);
+  document.querySelector("[data-download-student-badges]")?.addEventListener("click", (event) => downloadStudentBadgesPdf(event.currentTarget));
   document.querySelector("[data-add-user]")?.addEventListener("click", openUserModal);
   document.querySelector("[data-edit-profile]")?.addEventListener("click", openProfileModal);
   document.querySelector("[data-add-task]")?.addEventListener("click", openTaskModal);
@@ -3051,6 +3169,7 @@ function bindViewActions() {
     button.addEventListener("click", () => resetMentorXp(button.dataset.resetXp));
   });
   document.querySelector("[data-add-attendance]")?.addEventListener("click", openAttendanceModal);
+  document.querySelector("[data-scan-student-badges]")?.addEventListener("click", openStudentBadgeScanModal);
   document.querySelector("[data-open-doc-report]")?.addEventListener("click", openDocReportModal);
   document.querySelector("[data-add-payment]")?.addEventListener("click", () => openPaymentModal());
   document.querySelector("[data-add-expense]")?.addEventListener("click", openExpenseModal);
@@ -3635,7 +3754,9 @@ async function inventoryLabelImage(item) {
   return canvas.toDataURL("image/png");
 }
 
-function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2, align = "center") {
+  const previousAlign = ctx.textAlign;
+  ctx.textAlign = align;
   const words = String(text || "").split(/\s+/).filter(Boolean);
   const lines = [];
   let line = "";
@@ -3653,6 +3774,7 @@ function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
     const suffix = index === maxLines - 1 && lines.length > maxLines ? "..." : "";
     ctx.fillText(`${lineText}${suffix}`, x, y + index * lineHeight);
   });
+  ctx.textAlign = previousAlign;
 }
 
 function loadImage(src) {
@@ -3662,6 +3784,141 @@ function loadImage(src) {
     image.onerror = reject;
     image.src = src;
   });
+}
+
+async function downloadStudentBadgesPdf(button) {
+  const students = filteredStudents();
+  if (!students.length) return;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Готовлю PDF...";
+  try {
+    await Promise.all([
+      loadExternalScript(JSPDF_URL, () => Boolean(window.jspdf?.jsPDF)),
+      loadExternalScript(QR_GENERATOR_URL, () => Boolean(window.qrcode)),
+    ]);
+    let links = new Map();
+    if (backendEnabled) {
+      const data = await apiRequest("student_badge_links");
+      links = new Map((data.links || []).map((item) => [Number(item.studentId), item.url]));
+    }
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 8;
+    const gap = 4;
+    const columns = 2;
+    const rows = 4;
+    const perPage = columns * rows;
+    const badgeWidth = (pageWidth - margin * 2 - gap) / columns;
+    const badgeHeight = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+    const pages = chunkArray(students, perPage);
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+      if (pageIndex > 0) pdf.addPage();
+      for (let index = 0; index < pages[pageIndex].length; index += 1) {
+        const student = pages[pageIndex][index];
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        const x = margin + col * (badgeWidth + gap);
+        const y = margin + row * (badgeHeight + gap);
+        const url = links.get(Number(student.id)) || familyBadgeUrlLocal(student);
+        const image = await studentBadgeImage(student, url);
+        pdf.addImage(image, "PNG", x, y, badgeWidth, badgeHeight, undefined, "FAST");
+      }
+    }
+    pdf.save(`S7-student-badges-${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (error) {
+    alert("PDF бейджей не собрался. Проверьте интернет и попробуйте еще раз.");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+function familyBadgeUrlLocal(student) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("family", `local-${student.id}`);
+  return url.toString();
+}
+
+async function studentBadgeImage(student, url) {
+  const stats = childGamification(student);
+  const rank = childRank(stats.level);
+  const program = programProgress(student);
+  const width = 900;
+  const height = 620;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#ffffff");
+  gradient.addColorStop(1, "#eaf4ff");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#1d6fe8";
+  ctx.lineWidth = 8;
+  roundRect(ctx, 16, 16, width - 32, height - 32, 34);
+  ctx.stroke();
+  ctx.fillStyle = "#08244d";
+  ctx.font = "900 34px Arial, sans-serif";
+  ctx.fillText("S7 ROBOTICS", 54, 64);
+  ctx.fillStyle = "#1d6fe8";
+  ctx.font = "800 22px Arial, sans-serif";
+  ctx.fillText("Family Pass", 54, 94);
+  ctx.fillStyle = "#08244d";
+  ctx.font = "900 44px Arial, sans-serif";
+  wrapCanvasText(ctx, student.name, 54, 150, 500, 50, 2, "left");
+  ctx.font = "800 27px Arial, sans-serif";
+  ctx.fillStyle = "#40566f";
+  ctx.fillText(`${program.title} · ${student.group}`, 54, 270);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(54, 322, 300, 72);
+  ctx.strokeStyle = "#bfd2e8";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(54, 322, 300, 72);
+  ctx.fillStyle = "#08244d";
+  ctx.font = "900 28px Arial, sans-serif";
+  ctx.fillText(rank.title, 72, 350);
+  ctx.fillStyle = "#5d7088";
+  ctx.font = "800 20px Arial, sans-serif";
+  ctx.fillText(`Level ${stats.level} · ${stats.xp} XP`, 72, 378);
+  const qr = window.qrcode(0, "M");
+  qr.addData(url);
+  qr.make();
+  const qrImage = await loadImage(qr.createDataURL(8, 2));
+  ctx.fillStyle = "#ffffff";
+  roundRect(ctx, 620, 94, 220, 220, 22);
+  ctx.fill();
+  ctx.drawImage(qrImage, 642, 116, 176, 176);
+  ctx.fillStyle = "#08244d";
+  ctx.font = "800 20px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Сканируйте для семьи", 730, 340);
+  ctx.fillStyle = "#5d7088";
+  ctx.font = "700 18px Arial, sans-serif";
+  ctx.fillText("посещения · рейтинг · задания", 730, 368);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#1d6fe8";
+  ctx.font = "900 24px Arial, sans-serif";
+  ctx.fillText(`ID ${String(student.id).padStart(4, "0")}`, 54, 535);
+  ctx.fillStyle = "#5d7088";
+  ctx.font = "700 18px Arial, sans-serif";
+  ctx.fillText("s7robotics.space", 54, 565);
+  return canvas.toDataURL("image/png");
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
 }
 
 function openInventoryWriteoffModal() {
@@ -5128,6 +5385,143 @@ function buildAfterLessonTasks(lesson, students, form, presentIds, hasReport, ha
   return tasks;
 }
 
+function openStudentBadgeScanModal() {
+  if (isParent()) return;
+  const scanned = new Map();
+  let stream = null;
+  let detector = null;
+  let canvas = null;
+  let scanning = false;
+  const today = new Date().toISOString().slice(0, 10);
+  const renderScanned = () => {
+    const list = modalRoot.querySelector("#studentBadgeScanList");
+    const count = modalRoot.querySelector("#studentBadgeScanCount");
+    if (count) count.textContent = `${scanned.size} учеников`;
+    if (list) {
+      list.innerHTML = [...scanned.values()]
+        .map((student) => `<div class="list-row"><strong>${student.name}</strong><small>${student.group} · ${programProgress(student).title}</small></div>`)
+        .join("") || `<div class="empty">Пока никто не отсканирован</div>`;
+    }
+  };
+  const addScanned = (value) => {
+    const studentId = studentIdFromBadgeValue(value);
+    const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+    if (!student) return;
+    scanned.set(Number(student.id), student);
+    renderScanned();
+  };
+  const stopCamera = () => {
+    scanning = false;
+    stream?.getTracks().forEach((track) => track.stop());
+  };
+  openModal(
+    "Скан бейджей учеников",
+    `<div class="inventory-scan student-badge-scan">
+      <div class="inventory-scan-hero">
+        <div>
+          <span class="badge active">табель по QR</span>
+          <h3>Сканируйте бейджи детей</h3>
+          <p>После завершения все найденные ученики получат отметку «Был» в табеле.</p>
+        </div>
+        <strong id="studentBadgeScanCount">0 учеников</strong>
+      </div>
+      <label class="scan-note">Дата урока<input id="studentBadgeScanDate" type="date" value="${today}" /></label>
+      <video id="studentBadgeVideo" playsinline muted></video>
+      <div class="scan-status" id="studentBadgeScanStatus">Подключаем камеру...</div>
+      <div class="card-body list" id="studentBadgeScanList"><div class="empty">Пока никто не отсканирован</div></div>
+      <div class="form-actions"><button class="button ghost" data-close-modal type="button">Отмена</button><button class="button primary" data-finish-student-badge-scan type="button">Завершить сканирование</button></div>
+    </div>`,
+  );
+  modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", stopCamera));
+  modalRoot.querySelector("[data-finish-student-badge-scan]").addEventListener("click", async () => {
+    const date = modalRoot.querySelector("#studentBadgeScanDate")?.value || today;
+    stopCamera();
+    const items = [...scanned.values()].map((student) => ({ studentId: Number(student.id), date, status: "present", topic: "QR бейдж ученика" }));
+    if (backendEnabled) {
+      for (const item of items) await apiRequest("create_attendance", item);
+      closeModal();
+      await refreshData();
+      return;
+    }
+    items.forEach((item, index) => {
+      const existing = state.attendance.find((record) => Number(record.studentId) === Number(item.studentId) && record.date === item.date);
+      if (existing) {
+        existing.status = "present";
+        existing.topic = item.topic;
+      } else {
+        state.attendance.unshift({ ...item, id: Date.now() + index, createdBy: currentUser.name });
+      }
+      syncStudentSubscription(item.studentId);
+    });
+    saveState();
+    closeModal();
+    render();
+  });
+  (async () => {
+    const video = modalRoot.querySelector("#studentBadgeVideo");
+    const statusNode = modalRoot.querySelector("#studentBadgeScanStatus");
+    const setStatus = (message) => {
+      if (statusNode) statusNode.textContent = message;
+    };
+    if (!navigator.mediaDevices?.getUserMedia || !video) {
+      setStatus("Камера недоступна. Откройте сайт через HTTPS и разрешите камеру.");
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+      await video.play();
+      scanning = true;
+      const supported = "BarcodeDetector" in window && BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : [];
+      if ("BarcodeDetector" in window && (!supported.length || supported.includes("qr_code"))) {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        setStatus("Камера включена. Наведите QR бейджа на экран.");
+        const tick = async () => {
+          if (!scanning || !detector) return;
+          try {
+            const codes = await detector.detect(video);
+            codes.forEach((code) => addScanned(code.rawValue));
+          } catch {}
+          requestAnimationFrame(tick);
+        };
+        tick();
+        return;
+      }
+      setStatus("Камера включена. Загружаем QR-сканер...");
+      const jsQR = await loadQrDecoder();
+      canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      setStatus("Камера включена. Наведите QR бейджа на экран.");
+      const tick = () => {
+        if (!scanning || !context || !video.videoWidth) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(imageData.data, imageData.width, imageData.height);
+        if (result?.data) addScanned(result.data);
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (error) {
+      setStatus("Не удалось включить камеру. Разрешите доступ в браузере.");
+    }
+  })();
+}
+
+function studentIdFromBadgeValue(value) {
+  const raw = String(value || "");
+  try {
+    const url = new URL(raw);
+    const badge = url.searchParams.get("family") || "";
+    if (badge.startsWith("local-")) return Number(badge.replace("local-", ""));
+    return Number(badge.split(".")[0]);
+  } catch {
+    if (raw.startsWith("local-")) return Number(raw.replace("local-", ""));
+    return Number(raw.split(".")[0]);
+  }
+}
+
 function openAttendanceModal(selectedStudentId = null) {
   openModal(
     "Новая отметка",
@@ -6064,6 +6458,12 @@ modalRoot.addEventListener("click", (event) => {
 
 async function initApp() {
   try {
+    const familyBadge = new URLSearchParams(window.location.search).get("family");
+    if (familyBadge) {
+      const data = await apiRequest("family_access", { badge: familyBadge });
+      applyAuthResponse(data);
+      return;
+    }
     const status = await apiRequest("status");
     state.users = status.hasUsers ? [{ id: 0, name: "server", role: "admin", groups: [] }] : [];
     state.students = status.students || [];

@@ -29,6 +29,7 @@ try {
         'login' => login($pdo, $input),
         'register_first_admin' => register_first_admin($pdo, $input),
         'register_parent' => register_parent($pdo, $input),
+        'family_access' => family_access($pdo, $input),
         'qr_attendance' => qr_attendance($pdo),
         'data' => data_response($pdo, require_user($pdo)),
         'logout' => logout($pdo, require_user($pdo)),
@@ -46,6 +47,7 @@ try {
         'create_attendance' => create_attendance($pdo, require_user($pdo), $input),
         'qr_attendance_link' => qr_attendance_link($pdo, require_user($pdo), $input),
         'parent_qr_attendance' => parent_qr_attendance($pdo, require_user($pdo), $input),
+        'student_badge_links' => student_badge_links($pdo, require_user($pdo), $input),
         'toggle_attendance' => toggle_attendance($pdo, require_user($pdo), $input),
         'create_feedback' => create_feedback($pdo, require_user($pdo), $input),
         'create_lesson_archive' => create_lesson_archive($pdo, require_user($pdo), $input),
@@ -775,9 +777,63 @@ function parent_qr_attendance(PDO $pdo, array $user, array $input): void
     data_response($pdo, $user);
 }
 
+function student_badge_links(PDO $pdo, array $user, array $input): void
+{
+    if ($user['role'] === 'parent') {
+        fail('Бейджи доступны только команде.', 403);
+    }
+    $students = $user['role'] === 'admin' ? all_students($pdo) : mentor_students($pdo, $user);
+    $origin = app_base_url();
+    respond([
+        'links' => array_map(fn($student) => [
+            'studentId' => (int)$student['id'],
+            'url' => $origin . '/?family=' . family_badge_value((int)$student['id']),
+        ], $students),
+    ]);
+}
+
+function family_access(PDO $pdo, array $input): void
+{
+    $badge = trim((string)required($input, 'badge'));
+    $studentId = family_badge_student_id($badge);
+    if (!$studentId) {
+        fail('QR бейдж недействителен.', 403);
+    }
+    $stmt = $pdo->prepare('select * from students where id = ?');
+    $stmt->execute([$studentId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        fail('Ученик не найден.', 404);
+    }
+    $student = student_row($row);
+    $user = [
+        'id' => 0,
+        'name' => 'Семья · ' . $student['name'],
+        'phone' => '',
+        'email' => 'family-' . $studentId . '@badge.local',
+        'role' => 'parent',
+        'groups_json' => json_encode([$studentId], JSON_UNESCAPED_UNICODE),
+    ];
+    respond(['user' => public_user($user), 'state' => state_for_user($pdo, $user), 'familyMode' => true]);
+}
+
 function qr_attendance_token(int $studentId, string $date): string
 {
     return hash_hmac('sha256', $studentId . '|' . $date, qr_secret());
+}
+
+function family_badge_value(int $studentId): string
+{
+    return $studentId . '.' . hash_hmac('sha256', 'family|' . $studentId, qr_secret());
+}
+
+function family_badge_student_id(string $badge): int
+{
+    $parts = explode('.', $badge, 2);
+    if (count($parts) !== 2) return 0;
+    $studentId = (int)$parts[0];
+    if ($studentId <= 0) return 0;
+    return hash_equals(family_badge_value($studentId), $badge) ? $studentId : 0;
 }
 
 function qr_secret(): string
