@@ -1889,6 +1889,40 @@ td small {
   box-shadow: inset 4px 0 0 var(--amber);
 }
 
+.attendance-week-row td:first-child {
+  box-shadow: inset 4px 0 0 hsl(var(--week-color) 82% 48%);
+}
+
+.attendance-warning-row.attendance-week-row td:first-child {
+  box-shadow:
+    inset 4px 0 0 var(--amber),
+    inset 8px 0 0 hsl(var(--week-color) 82% 48%);
+}
+
+.weekly-count-cell {
+  min-width: 86px;
+}
+
+.weekly-count-cell small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.weekly-attendance-badge {
+  min-width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid hsl(var(--week-color) 82% 44% / 0.22);
+  border-radius: 999px;
+  background: hsl(var(--week-color) 88% 94%);
+  color: hsl(var(--week-color) 76% 32%);
+  font-weight: 950;
+  box-shadow: 0 8px 18px hsl(var(--week-color) 70% 52% / 0.12);
+}
+
 .mark {
   min-width: 30px;
   height: 30px;

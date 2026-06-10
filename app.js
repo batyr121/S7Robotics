@@ -413,6 +413,27 @@ function formatDate(date) {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(new Date(date));
 }
 
+function isoDate(date) {
+  const copy = new Date(date);
+  copy.setHours(12, 0, 0, 0);
+  return copy.toISOString().slice(0, 10);
+}
+
+function currentWeekRange(date = new Date()) {
+  const start = new Date(date);
+  start.setHours(12, 0, 0, 0);
+  const mondayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - mondayOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return { start: isoDate(start), end: isoDate(end) };
+}
+
+function inDateRange(date, from, to) {
+  if (!date) return false;
+  return (!from || date >= from) && (!to || date <= to);
+}
+
 function byId(id) {
   return state.students.find((student) => student.id === Number(id));
 }
@@ -437,6 +458,20 @@ function studentPresentAttendance(studentId) {
   return (state.attendance || [])
     .filter((item) => Number(item.studentId) === Number(studentId) && item.status === "present")
     .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function studentWeeklyPresentCount(studentId, range = currentWeekRange()) {
+  return (state.attendance || []).filter(
+    (item) => Number(item.studentId) === Number(studentId) && item.status === "present" && inDateRange(item.date, range.start, range.end),
+  ).length;
+}
+
+function weeklyAttendanceHue(count) {
+  return (205 + Number(count || 0) * 47) % 360;
+}
+
+function weeklyAttendanceBadge(count) {
+  return `<span class="weekly-attendance-badge" style="--week-color:${weeklyAttendanceHue(count)}">${count}</span>`;
 }
 
 function studentAttendanceSince(studentId, startDate = null) {
@@ -1710,6 +1745,10 @@ function renderAttendance() {
   if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
   const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
   const records = visibleAttendance();
+  const weekRange = currentWeekRange();
+  const weeklyCounts = new Map(students.map((student) => [Number(student.id), studentWeeklyPresentCount(student.id, weekRange)]));
+  const weeklyTotal = [...weeklyCounts.values()].reduce((sum, count) => sum + count, 0);
+  const weeklyActive = [...weeklyCounts.values()].filter((count) => count > 0).length;
 
   return `
     <div class="toolbar">
@@ -1732,6 +1771,8 @@ function renderAttendance() {
       ${stat("На оплату", students.filter((student) => subscriptionStatus(student).needsPayment).length, "осталось 0-1 занятий")}
       ${stat("2 НБ", students.filter((student) => subscriptionStatus(student).absent === 2).length, "следующая НБ списывается")}
       ${stat("Письмо", students.filter((student) => subscriptionStatus(student).needsDirectorLetter).length, "3+ НБ")}
+      ${stat("Эта неделя", weeklyTotal, `${formatDate(weekRange.start)} - ${formatDate(weekRange.end)}`)}
+      ${stat("Были", weeklyActive, "учеников на этой неделе")}
       ${stat("Учеников", students.length, attendanceGroup === "all" ? "все доступные группы" : attendanceGroup)}
     </div>
     <article class="card">
@@ -1746,6 +1787,7 @@ function renderAttendance() {
               <th>Ученик</th>
               <th>Группа</th>
               <th>Абонемент</th>
+              <th>Неделя</th>
               ${Array.from({ length: 8 }, (_, index) => `<th>${index + 1}</th>`).join("")}
               <th>Итого</th>
             </tr>
@@ -1758,16 +1800,18 @@ function renderAttendance() {
                   const presentCount = rowRecords.filter((item) => item.status === "present").length;
                   const sub = subscriptionStatus(student);
                   const cells = currentSubscriptionCells(student, sub);
+                  const weeklyCount = weeklyCounts.get(Number(student.id)) || 0;
                   const attendanceHint = sub.needsDirectorLetter
                     ? `НБ ${sub.absent}: письмо директору`
                     : sub.absent
                       ? `НБ ${sub.absent}/2 без списания`
                       : `${presentCount} посещений в истории`;
                   return `
-                    <tr class="${sub.remaining === 2 ? "attendance-warning-row" : ""}">
+                    <tr class="attendance-week-row ${sub.remaining === 2 ? "attendance-warning-row" : ""}" style="--week-color:${weeklyAttendanceHue(weeklyCount)}">
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
+                      <td class="weekly-count-cell">${weeklyAttendanceBadge(weeklyCount)}<small>за неделю</small></td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
                       <td>
                         <strong>${sub.totalProgressVisits}</strong>
@@ -1779,7 +1823,7 @@ function renderAttendance() {
                       </td>
                     </tr>`;
                 })
-                .join("") || `<tr><td colspan="12"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+                .join("") || `<tr><td colspan="13"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
             }
           </tbody>
         </table>
@@ -6445,11 +6489,6 @@ function reportTable(title, headers, rows) {
         </tbody>
       </table>
     </section>`;
-}
-
-function inDateRange(date, from, to) {
-  if (!date) return false;
-  return (!from || date >= from) && (!to || date <= to);
 }
 
 function escapeHtml(value) {
