@@ -98,7 +98,7 @@ function init_db(PDO $pdo): void
             phone text not null default '',
             email text not null unique,
             password_hash text not null,
-            role text not null check (role in ('admin', 'mentor', 'parent')),
+            role text not null check (role in ('admin', 'mentor', 'parent', 'student')),
             groups_json text not null default '[]',
             created_at text not null default current_timestamp
         );
@@ -372,9 +372,12 @@ function migrate_users_role_check(PDO $pdo): void
     $stmt->execute();
     $sql = (string)$stmt->fetchColumn();
     $stmt->closeCursor();
-    if (str_contains($sql, "'parent'")) {
+    if (str_contains($sql, "'student'")) {
         return;
     }
+    $columns = $pdo->query('pragma table_info(users)')->fetchAll();
+    $names = array_map(fn($column) => $column['name'] ?? '', $columns);
+    $phoneSelect = in_array('phone', $names, true) ? 'phone' : "''";
     $pdo->exec('pragma foreign_keys = off');
     $pdo->exec("
         drop table if exists users_new;
@@ -384,12 +387,12 @@ function migrate_users_role_check(PDO $pdo): void
             phone text not null default '',
             email text not null unique,
             password_hash text not null,
-            role text not null check (role in ('admin', 'mentor', 'parent')),
+            role text not null check (role in ('admin', 'mentor', 'parent', 'student')),
             groups_json text not null default '[]',
             created_at text not null default current_timestamp
         );
         insert into users_new (id, name, phone, email, password_hash, role, groups_json, created_at)
-            select id, name, '', email, password_hash, role, groups_json, created_at from users;
+            select id, name, $phoneSelect, email, password_hash, role, groups_json, created_at from users;
         drop table users;
         alter table users_new rename to users;
     ");
@@ -507,14 +510,14 @@ function register_parent(PDO $pdo, array $input): void
 
 function create_user(PDO $pdo, array $admin, array $input): void
 {
-    $role = in_array(($input['role'] ?? 'mentor'), ['admin', 'mentor', 'parent'], true) ? $input['role'] : 'mentor';
+    $role = in_array(($input['role'] ?? 'mentor'), ['admin', 'mentor', 'parent', 'student'], true) ? $input['role'] : 'mentor';
     insert_user($pdo, [
         'name' => required($input, 'name'),
         'phone' => $input['phone'] ?? '',
         'email' => required($input, 'email'),
         'password' => required($input, 'password'),
         'role' => $role,
-        'groups' => $role === 'admin' ? [] : ($role === 'parent' ? normalize_groups($input['childIds'] ?? $input['groups'] ?? []) : normalize_groups($input['groups'] ?? [])),
+        'groups' => $role === 'admin' ? [] : (in_array($role, ['parent', 'student'], true) ? normalize_groups($input['childIds'] ?? $input['groups'] ?? []) : normalize_groups($input['groups'] ?? [])),
     ]);
     data_response($pdo, $admin);
 }
@@ -712,7 +715,7 @@ function update_planned_expense_payment(PDO $pdo, array $admin, array $input): v
 
 function create_attendance(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель не может менять табель.', 403);
     }
     $studentId = (int)required($input, 'studentId');
@@ -736,7 +739,7 @@ function create_attendance(PDO $pdo, array $user, array $input): void
 
 function qr_attendance_link(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель не может создавать QR отметки.', 403);
     }
     $studentId = (int)required($input, 'studentId');
@@ -785,7 +788,7 @@ function parent_qr_attendance(PDO $pdo, array $user, array $input): void
 
 function student_badge_links(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Бейджи доступны только команде.', 403);
     }
     $students = $user['role'] === 'admin' ? all_students($pdo) : mentor_students($pdo, $user);
@@ -859,7 +862,7 @@ function app_base_url(): string
 
 function toggle_attendance(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель не может менять табель.', 403);
     }
     $studentId = (int)required($input, 'studentId');
@@ -907,7 +910,7 @@ function recalc_student_subscription(PDO $pdo, int $studentId): void
 
 function create_feedback(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель может оставлять отзывы через родительский кабинет.', 403);
     }
     $studentId = (int)required($input, 'studentId');
@@ -927,7 +930,7 @@ function create_feedback(PDO $pdo, array $user, array $input): void
 
 function create_lesson_archive(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Архив уроков доступен ментору или администратору.', 403);
     }
     $group = required($input, 'group');
@@ -959,7 +962,7 @@ function create_lesson_archive(PDO $pdo, array $user, array $input): void
 
 function create_homework(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Домашние задания создает ментор или администратор.', 403);
     }
     $studentIds = array_map('intval', (array)($input['studentIds'] ?? [$input['studentId'] ?? 0]));
@@ -989,7 +992,7 @@ function update_homework_status(PDO $pdo, array $user, array $input): void
     $homework = $stmt->fetch();
     if (!$homework) fail('Домашнее задание не найдено.', 404);
     assert_student_access($pdo, $user, (int)$homework['student_id']);
-    if ($user['role'] === 'parent' && $status !== 'done') {
+    if (in_array($user['role'], ['parent', 'student'], true) && $status !== 'done') {
         fail('Родитель может только отметить выполнение.', 403);
     }
     $stmt = $pdo->prepare('update homework set status = ? where id = ?');
@@ -999,7 +1002,7 @@ function update_homework_status(PDO $pdo, array $user, array $input): void
 
 function delete_homework(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель не может удалять домашние задания.', 403);
     }
     $homeworkId = (int)required($input, 'id');
@@ -1015,7 +1018,7 @@ function delete_homework(PDO $pdo, array $user, array $input): void
 
 function create_photo_report(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Фотоотчет создает ментор или администратор.', 403);
     }
     $studentId = (int)required($input, 'studentId');
@@ -1037,7 +1040,7 @@ function create_photo_report(PDO $pdo, array $user, array $input): void
 
 function delete_photo_report(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Родитель не может удалять фотоотчеты.', 403);
     }
     $reportId = (int)required($input, 'id');
@@ -1454,7 +1457,7 @@ function create_inventory_item(PDO $pdo, array $admin, array $input): void
 
 function create_inventory_audit(PDO $pdo, array $user, array $input): void
 {
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         fail('Инвентаризация доступна только команде.', 403);
     }
     $expected = is_array($input['expected'] ?? null) ? $input['expected'] : [];
@@ -1545,7 +1548,9 @@ function state_for_user(PDO $pdo, array $user): array
 {
     $isAdmin = $user['role'] === 'admin';
     $isParent = $user['role'] === 'parent';
-    $students = $isAdmin ? all_students($pdo) : ($isParent ? parent_students($pdo, $user) : mentor_students($pdo, $user));
+    $isStudent = $user['role'] === 'student';
+    $isFamily = $isParent || $isStudent;
+    $students = $isAdmin ? all_students($pdo) : ($isFamily ? parent_students($pdo, $user) : mentor_students($pdo, $user));
     $ids = array_map(fn($student) => (int)$student['id'], $students);
     return [
         'users' => $isAdmin ? all_users($pdo) : [public_user($user)],
@@ -1555,21 +1560,21 @@ function state_for_user(PDO $pdo, array $user): array
         'plannedExpenses' => $isAdmin ? all_planned_expenses($pdo) : [],
         'attendance' => rows_for_ids($pdo, 'attendance', $ids),
         'feedback' => rows_for_ids($pdo, 'feedback', $ids),
-        'lessonArchives' => $isAdmin ? all_lesson_archives($pdo) : ($isParent ? [] : mentor_lesson_archives($pdo, $user)),
+        'lessonArchives' => $isAdmin ? all_lesson_archives($pdo) : ($isFamily ? [] : mentor_lesson_archives($pdo, $user)),
         'homework' => rows_for_ids($pdo, 'homework', $ids),
         'photoReports' => rows_for_ids($pdo, 'photo_reports', $ids),
         'certificates' => rows_for_ids($pdo, 'certificates', $ids),
-        'schedule' => $isAdmin ? all_schedule($pdo) : ($isParent ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
-        'trialLessons' => $isAdmin ? all_trial_lessons($pdo) : ($isParent ? [] : mentor_trial_lessons($pdo, $user)),
-        'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : ($isParent ? [] : mentor_lesson_checks($pdo, $user)),
-        'tasks' => $isAdmin ? all_tasks($pdo) : ($isParent ? [] : user_tasks($pdo, $user)),
-        'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : ($isParent ? [] : mentor_xp_adjustments($pdo, $user)),
-        'salaries' => $isAdmin ? all_salaries($pdo) : ($isParent ? [] : mentor_salaries($pdo, $user)),
-        'methods' => $isAdmin ? all_methods($pdo) : ($isParent ? [] : mentor_methods($pdo, $user)),
-        'parentReviews' => $isAdmin ? all_parent_reviews($pdo) : parent_reviews_for_ids($pdo, $ids),
+        'schedule' => $isAdmin ? all_schedule($pdo) : ($isFamily ? schedule_for_students($pdo, $students) : mentor_schedule($pdo, $user)),
+        'trialLessons' => $isAdmin ? all_trial_lessons($pdo) : ($isFamily ? [] : mentor_trial_lessons($pdo, $user)),
+        'lessonChecks' => $isAdmin ? all_lesson_checks($pdo) : ($isFamily ? [] : mentor_lesson_checks($pdo, $user)),
+        'tasks' => $isAdmin ? all_tasks($pdo) : ($isFamily ? [] : user_tasks($pdo, $user)),
+        'xpAdjustments' => $isAdmin ? all_xp_adjustments($pdo) : ($isFamily ? [] : mentor_xp_adjustments($pdo, $user)),
+        'salaries' => $isAdmin ? all_salaries($pdo) : ($isFamily ? [] : mentor_salaries($pdo, $user)),
+        'methods' => $isAdmin ? all_methods($pdo) : ($isFamily ? [] : mentor_methods($pdo, $user)),
+        'parentReviews' => $isAdmin ? all_parent_reviews($pdo) : ($isParent ? parent_reviews_for_ids($pdo, $ids) : []),
         'announcements' => all_announcements($pdo),
-        'inventoryItems' => $isParent ? [] : all_inventory_items($pdo),
-        'inventoryAudits' => $isParent ? [] : ($isAdmin ? all_inventory_audits($pdo) : mentor_inventory_audits($pdo, $user)),
+        'inventoryItems' => $isFamily ? [] : all_inventory_items($pdo),
+        'inventoryAudits' => $isFamily ? [] : ($isAdmin ? all_inventory_audits($pdo) : mentor_inventory_audits($pdo, $user)),
         'inventoryWriteoffs' => $isAdmin ? all_inventory_writeoffs($pdo) : [],
         'familyConfig' => family_config($pdo),
     ];
@@ -1967,11 +1972,11 @@ function require_admin(PDO $pdo): array
 function assert_student_access(PDO $pdo, array $user, int $studentId): void
 {
     if ($user['role'] === 'admin') return;
-    if ($user['role'] === 'parent') {
+    if (in_array($user['role'], ['parent', 'student'], true)) {
         if (in_array((string)$studentId, user_groups($user), true) || in_array($studentId, array_map('intval', user_groups($user)), true)) {
             return;
         }
-        fail('Родитель видит только привязанных детей.', 403);
+        fail('Доступ открыт только к привязанным ученикам.', 403);
     }
     $stmt = $pdo->prepare('select * from students where id = ?');
     $stmt->execute([$studentId]);

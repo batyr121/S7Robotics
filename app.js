@@ -7,6 +7,7 @@ const QR_DECODER_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js
 const JSPDF_URL = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
 const QR_GENERATOR_URL = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js";
 const LESSON_DURATION_MINUTES = 90;
+const STUDENT_CHECKLIST_KEY = "s7robotics-student-checks-v1";
 const DEFAULT_FAMILY_CONFIG = {
   levelXp: 1000,
   ranks: [
@@ -51,6 +52,43 @@ const DEFAULT_FAMILY_CONFIG = {
   ],
 };
 
+const STUDENT_LESSONS = [
+  learningLesson(1, "Система светофора", "Датчик цвета и условия IF/ELSE", "Робот должен понимать цвет как команду: зеленый - ехать, красный - остановиться. На уроке важно увидеть, что датчик не магия, а измеритель, которому нужны правильная высота и свет.", "Собери базовое шасси, закрепи датчик цвета спереди, напиши цикл проверки цвета и протестируй робота на карточках красного и зеленого цвета.", ["Датчик закреплен на высоте 8-15 мм", "В коде есть бесконечный цикл", "Робот останавливается на красном без касания карточки"]),
+  learningLesson(2, "Датчик касания и лабиринт", "Реакция робота на столкновение", "Датчик касания работает как кнопка безопасности. Если робот ударился бампером, он должен отъехать, повернуть и продолжить путь.", "Собери широкий бампер, подключи датчик касания, запрограммируй отъезд назад и разворот после нажатия.", ["Бампер нажимает датчик без заедания", "После удара робот отъезжает назад", "Поворот уводит робота от стены"]),
+  learningLesson(3, "Ультразвуковой датчик расстояния", "Зрение робота и безопасная дистанция", "Ультразвуковой датчик измеряет расстояние до препятствия. Робот может ехать сам, пока перед ним свободно, и объезжать опасную зону.", "Закрепи датчик спереди, поставь условие расстояния больше 15 см и проведи робота через трассу с препятствиями.", ["Датчик смотрит прямо вперед", "В программе используются сантиметры", "Скорость не мешает роботу остановиться"]),
+  learningLesson(4, "Мега-лабиринт", "Комбинация трех датчиков", "Настоящая автономность появляется, когда робот принимает решения по нескольким источникам: цвет, касание и расстояние.", "Объедини датчик цвета, касания и ультразвук в одном алгоритме для прохождения полосы препятствий.", ["Все датчики подключены к правильным портам", "Команда нарисовала блок-схему решения", "Робот доезжает до финишной линии"]),
+  learningLesson(5, "Движение по черной линии", "Релейный регулятор", "Робот не едет по линии идеально прямо. Он постоянно поправляет курс: увидел белое - возвращается к черному, увидел черное - корректирует движение.", "Установи датчик цвета вниз, измерь значения черного и белого, настрой движение по краю линии.", ["Датчик смотрит вниз на 8-10 мм", "Есть порог черного/белого", "Робот проходит 3 круга без схода"]),
+  learningLesson(6, "Сложное шасси", "Передачи, сила и скорость", "Шестерни помогают менять характер движения: больше силы - меньше скорости, больше скорости - меньше тяги.", "Собери шасси с передачей, протестируй подъем на пандус и настрой плавный старт.", ["Шестерни не пережаты", "Колеса не проскальзывают", "Скорость ограничена для устойчивости"]),
+  learningLesson(7, "Механизм захвата груза", "Манипулятор и точные тайминги", "Захват должен не просто закрыться, а удержать предмет. Для этого важны рычаги, сила мотора и паузы в программе.", "Собери клешню, запрограммируй захват кубика и доставку в базу.", ["Клешня не заклинивает мотор", "Кубик удерживается при движении", "Есть пауза перед подъемом груза"]),
+  learningLesson(8, "Боевое робо-сумо", "Стратегия атаки и защита от края", "Сумо-робот ищет соперника, атакует и не должен вылететь за белую линию ринга.", "Построй низкую прочную платформу, добавь ковш, ультразвук и датчик цвета для края ринга.", ["Робот проходит проверку габаритов", "Белая линия распознается", "Атака включается при цели впереди"]),
+  learningLesson(9, "Робогеометрия и гироскоп", "Точный поворот по углу", "Гироскоп помогает роботу понимать, насколько он повернулся. Это основа движения по квадрату, треугольнику и многоугольникам.", "Запрограммируй движение по квадрату и проверь точность поворотов на 90 градусов.", ["Гироскоп обнулен перед стартом", "Робот делает 4 стороны фигуры", "Команда объяснила внешний угол"]),
+  learningLesson(10, "Робо-баскетбол: катапульта", "Энергия, рычаг и бросок", "Катапульта превращает энергию мотора или резинки в бросок. Точность зависит от угла, силы и стабильности конструкции.", "Спроектируй катапульту и добейся попадания мяча в цель с одной позиции.", ["Катапульта не разваливается при броске", "Есть одинаковый стартовый угол", "Команда записала удачную мощность"]),
+  learningLesson(11, "Робо-баскетбол: автоматизация", "Соединение базы, датчиков и броска", "Теперь робот должен не только бросать, но и сам занять позицию, остановиться и выполнить бросок.", "Интегрируй катапульту с колесной базой, настрой подъезд и автоматический бросок.", ["Робот останавливается в зоне броска", "Катапульта срабатывает по команде", "Код можно повторить 3 раза подряд"]),
+  learningLesson(12, "Робот-мерген", "Снайперский механизм", "Точная стрельба требует устойчивости, повторяемого триггера и понятной траектории.", "Собери ударный механизм, настрой прицеливание и протестируй серию выстрелов.", ["Основание устойчивое", "Триггер не клинит", "Есть минимум 3 тестовых выстрела"]),
+  learningLesson(13, "Скоростной эксперт-робот", "Опыт настройки скорости", "Быстрый робот - это не только мощность 100%. Важно управлять ускорением, балансом и торможением.", "Собери легкую скоростную базу и найди максимальную скорость, при которой робот остается управляемым.", ["Робот не переворачивается", "Есть тест на прямой трассе", "Команда сравнила 3 значения скорости"]),
+  learningLesson(14, "Робот-биомиметик", "Шагающий механизм", "Биомиметика копирует идеи природы. Шагающий робот учит видеть связь между вращением мотора и движением ног.", "Собери механизм Тео Янсена или похожую шагающую схему и добейся ровного шага.", ["Ноги двигаются синхронно", "Соединения не вылетают", "Робот проходит короткую дистанцию"]),
+  learningLesson(15, "Мега-троеборье: подготовка", "Повторение линии, парковки и датчиков", "Это экватор курса: нужно собрать все навыки в один инженерный вызов.", "Подготовь робота к спринту по линии и парковке задним ходом.", ["Проверена линия", "Проверена парковка", "Команда распределила роли"]),
+  learningLesson(16, "Мега-троеборье: турнир", "Стабильность под давлением", "В турнире побеждает не самый сложный робот, а самый стабильный и понятный.", "Запусти робота на арене, исправь слабые места и защити решение команды.", ["Робот прошел минимум 3 теста", "Ошибки записаны", "Команда объяснила улучшение"]),
+  learningLesson(17, "Переход на EV3", "Новая платформа, старые принципы", "EV3 отличается интерфейсом и деталями, но инженерная логика остается той же: моторы, датчики, алгоритм.", "Собери EV3-сумо и сравни поведение с SPIKE Prime.", ["Подключены моторы EV3", "Проверены датчики", "Команда нашла 2 отличия платформ"]),
+  learningLesson(18, "Аркан-тартыс", "Тяга и сцепление", "В перетягивании каната важны масса, сцепление колес и передаточное отношение.", "Собери тягового робота и протестируй разные колеса/передачи.", ["Робот тянет без пробуксовки", "Передача усилена", "Команда сравнила две конфигурации"]),
+  learningLesson(19, "Линия на EV3", "Двухдатчиковый регулятор", "Два датчика дают роботу больше информации: он видит левую и правую границу линии.", "Настрой движение по линии на EV3 с двумя датчиками цвета.", ["Оба датчика откалиброваны", "Робот держит центр линии", "Скорость подобрана под трассу"]),
+  learningLesson(20, "Высокоточный лабиринт EV3", "Точность энкодеров и датчиков", "Энкодеры помогают ехать на заданное расстояние, а датчики уточняют реакцию на стены.", "Пройди лабиринт EV3, используя точные расстояния и развороты.", ["Расстояния измерены", "Повороты повторяемые", "Робот не касается стен чаще 2 раз"]),
+  learningLesson(21, "Гиро-навигация EV3", "Многоугольники и переменные", "Формула 360/N помогает роботу строить правильные фигуры с любым количеством сторон.", "Создай программный блок с переменной N и проведи робота через ворота многоугольника.", ["Гироскоп обнулен", "Есть переменная N", "Робот проходит заданную фигуру"]),
+  learningLesson(22, "Rube Goldberg Day", "Цепная реакция", "Большая система работает, когда каждый модуль запускает следующий точно и вовремя.", "Построй командный модуль цепной реакции и состыкуй его с другими роботами.", ["Триггер модуля определен", "Модуль сработал 5 раз отдельно", "Команда помогла соединить цепь"]),
+  learningLesson(23, "Робо-завод", "Автоматизированная фабрика", "Фабрика - это цикл действий: подать деталь, обработать, проверить и повторить.", "Собери мини-фабрику или конвейер и подготовь короткий питч проекта.", ["Есть повторяемый цикл", "Есть аварийная остановка", "Команда презентовала механику и код"]),
+  learningLesson(24, "Робот-доставщик", "Курьер и маршрут", "Курьер должен ехать по маршруту, остановиться у клиента, выгрузить груз и вернуться.", "Собери грузовой отсек, запрограммируй доставку по линии и аккуратную выгрузку.", ["Груз не падает в пути", "Робот останавливается у точки", "Возврат на базу работает"]),
+  learningLesson(25, "Робо-манипулятор", "Координаты моторов", "Манипулятору нужны точные углы. Если записать координаты, робот сможет повторять движение.", "Собери робо-руку и перенеси максимум деталей за 60 секунд.", ["Основание не опрокидывается", "Углы моторов записаны", "Манипулятор переносит детали"]),
+  learningLesson(26, "Робот-змейка", "Биомеханика волны", "Змейка движется за счет волнообразного смещения звеньев, а не обычных колес.", "Собери модульную змейку и настрой задержки для плавной волны.", ["Звенья надежно соединены", "Волна выглядит плавно", "Робот проходит коридор"]),
+  learningLesson(27, "Гранд-турнир: проектирование", "Подготовка финального робота", "Перед финалом важно провести техосмотр: конструкция, код, стабильность, слабые места.", "Собери финального робота, проведи стресс-тесты и сдай тех-контроль.", ["5 запусков подряд", "Слабые места записаны", "Робот прошел техосмотр"]),
+  learningLesson(28, "Гранд-турнир: финальные заезды", "Защита решения", "Финал проверяет не только робота, но и умение объяснить инженерное решение.", "Участвуй в заездах, запиши результат и подготовь защитную речь.", ["Робот готов к старту", "Результат зафиксирован", "Команда объяснила преимущества"]),
+  learningLesson(29, "PyBricks: Hello World", "Первый текстовый код", "Python требует точности: регистр букв, отступы, скобки и правильные импорты.", "Напиши программу, где робот едет 50 см, издает сигнал и выводит имя команды.", ["Импорты написаны правильно", "Порты моторов указаны верно", "Код запускается без синтаксических ошибок"]),
+  learningLesson(30, "Python: функции движения", "Повторяемые команды", "Функция позволяет один раз описать действие и использовать его много раз.", "Создай функции drive_forward, turn_right и используй их для маршрута.", ["Есть минимум 2 функции", "Функции вызываются несколько раз", "Маршрут читается понятно"]),
+  learningLesson(31, "Python: условия и датчики", "if/else в текстовом коде", "Условия в Python дают роботу выбор: ехать, остановиться, повернуть или ждать.", "Подключи датчик и напиши условие реакции на цвет или расстояние.", ["Данные датчика читаются", "Есть if/else", "Робот меняет поведение по условию"]),
+  learningLesson(32, "Python: циклы и калибровка", "while и стабильные измерения", "Цикл позволяет роботу повторять проверку датчика постоянно, а калибровка делает решение точнее.", "Настрой движение по линии или объезд стены через while-цикл.", ["Есть цикл while", "Порог датчика подобран", "Робот работает без ручного вмешательства"]),
+  learningLesson(33, "Мини-проект Python", "Самостоятельная сборка алгоритма", "Мини-проект объединяет механику, датчики и код. Главная цель - рабочий прототип.", "Выбери задачу, собери прототип, напиши код и подготовь демонстрацию.", ["Есть цель проекта", "Код разделен на логические блоки", "Прототип показан группе"]),
+  learningLesson(34, "Финальная защита S7", "Инженерная презентация", "Инженер должен уметь не только собрать робота, но и объяснить, почему решение работает.", "Проведи финальный запуск, защити проект и заполни самооценку по курсу.", ["Проект запущен перед группой", "Названы 2 сильные стороны", "Названа 1 зона роста"]),
+];
+
 const seed = {
   users: [],
   students: [],
@@ -77,6 +115,10 @@ const seed = {
   announcements: [],
   familyConfig: structuredClone(DEFAULT_FAMILY_CONFIG),
 };
+
+function learningLesson(number, title, concept, explanation, practice, checklist) {
+  return { number, title, concept, explanation, practice, checklist };
+}
 
 const statusText = {
   active: "Активен",
@@ -256,17 +298,26 @@ function isParent() {
   return currentUser?.role === "parent";
 }
 
+function isStudent() {
+  return currentUser?.role === "student";
+}
+
+function isFamilyUser() {
+  return isParent() || isStudent();
+}
+
 function canUse(view) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   if (isParent()) return ["dashboard", "students", "attendance", "schedule", "feedback", "parent"].includes(view);
+  if (isStudent()) return ["dashboard", "students", "schedule", "feedback", "learning"].includes(view);
   return ["dashboard", "students", "attendance", "schedule", "trials", "feedback", "tasks", "inventory", "methods", "salary", "team"].includes(view);
 }
 
 function visibleStudents() {
   if (!currentUser) return [];
   if (isAdmin()) return state.students;
-  if (isParent()) {
+  if (isFamilyUser()) {
     const ids = new Set((currentUser.groups || []).map((id) => Number(id)));
     return state.students.filter((student) => ids.has(Number(student.id)));
   }
@@ -295,7 +346,7 @@ function visibleFeedback() {
 
 function visibleLessonArchives() {
   if (isAdmin()) return state.lessonArchives || [];
-  if (isParent()) return [];
+  if (isFamilyUser()) return [];
   const groups = new Set(currentUser?.groups || []);
   return (state.lessonArchives || []).filter((item) => groups.has(item.group) || item.mentor === currentUser?.name);
 }
@@ -317,7 +368,7 @@ function visibleCertificates() {
 
 function visibleSchedule() {
   if (isAdmin()) return state.schedule;
-  if (isParent()) {
+  if (isFamilyUser()) {
     const groups = new Set(visibleStudents().map((student) => student.group));
     return state.schedule.filter((lesson) => groups.has(lesson.group));
   }
@@ -327,7 +378,7 @@ function visibleSchedule() {
 
 function visibleTrialLessons() {
   if (isAdmin()) return state.trialLessons || [];
-  if (isParent()) return [];
+  if (isFamilyUser()) return [];
   const groups = new Set(currentUser?.groups || []);
   return (state.trialLessons || []).filter((lesson) => groups.has(lesson.group) || lesson.mentor === currentUser?.name);
 }
@@ -858,8 +909,10 @@ function renderShell() {
     ? "Админ"
     : isParent()
       ? `${familyMode ? "Семейный QR" : "Родитель"} · ${visibleStudents().length} детей`
+      : isStudent()
+        ? `Ученик · ${visibleStudents()[0]?.group || "без группы"}`
       : `Ментор · ${currentUser.groups.join(", ") || "нет групп"}`;
-  if (heroBand) heroBand.hidden = isParent();
+  if (heroBand) heroBand.hidden = isFamilyUser();
   if (pendingParentQrScan && isParent() && !parentQrScanHandled) activeView = "parent";
   if (!canUse(activeView)) activeView = "dashboard";
   updatePageTitle();
@@ -951,6 +1004,7 @@ function updatePageTitle() {
     payments: "Абонементы",
     feedback: "Фидбек",
     parent: "Семья",
+    learning: "Обучение",
     tasks: "Задачи",
     inventory: "Инвентарь",
     methods: "Методика",
@@ -969,6 +1023,7 @@ function render() {
     payments: renderPayments,
     feedback: renderFeedback,
     parent: renderParentPortal,
+    learning: renderLearning,
     tasks: renderTasks,
     inventory: renderInventory,
     methods: renderMethods,
@@ -992,6 +1047,7 @@ function updateToday() {
 
 function renderDashboard() {
   if (isParent()) return renderParentDashboard();
+  if (isStudent()) return renderLearning();
   const students = visibleStudents();
   const payments = isAdmin() ? state.payments : visiblePayments();
   const attendance = visibleAttendance();
@@ -1016,7 +1072,7 @@ function renderDashboard() {
           </div>`
         : ""
     }
-    ${!isParent() ? lessonLaunchPanel() : ""}
+    ${!isFamilyUser() ? lessonLaunchPanel() : ""}
     <div class="stats-grid">
       ${stat("Ученики", students.length, isAdmin() ? "все группы" : "мои группы")}
       ${stat("Активные", active, "учатся сейчас")}
@@ -1354,7 +1410,7 @@ function attentionRow(item) {
 
 function activeLessonBanner() {
   const session = getActiveLessonSession();
-  if (!session || isParent()) return "";
+  if (!session || isFamilyUser()) return "";
   const remaining = lessonRemaining(session);
   const done = remaining.total <= 0;
   return `
@@ -1419,7 +1475,7 @@ function formatClock(date) {
 
 function syncLessonTimer() {
   if (lessonTimerId) clearInterval(lessonTimerId);
-  if (!getActiveLessonSession() || isParent()) return;
+  if (!getActiveLessonSession() || isFamilyUser()) return;
   lessonTimerId = setInterval(() => {
     const session = getActiveLessonSession();
     const timer = document.querySelector("[data-lesson-timer]");
@@ -1632,6 +1688,115 @@ function programProgress(student) {
     nextLesson,
     remaining: Math.max(0, total - completed),
   };
+}
+
+function renderLearning() {
+  const students = visibleStudents();
+  const selectedId = Number(localStorage.getItem("s7robotics-learning-student") || students[0]?.id || 0);
+  const student = students.find((item) => Number(item.id) === selectedId) || students[0];
+  if (!student) return `<div class="empty">Нет привязанного ученика для учебного кабинета.</div>`;
+  localStorage.setItem("s7robotics-learning-student", String(student.id));
+  const progress = programProgress(student);
+  const currentLesson = STUDENT_LESSONS.find((lesson) => lesson.number === progress.nextLesson) || STUDENT_LESSONS.at(-1);
+  const completedLessons = STUDENT_LESSONS.filter((lesson) => lesson.number <= progress.completed);
+  const upcomingLessons = STUDENT_LESSONS.filter((lesson) => lesson.number > progress.completed).slice(0, 6);
+  const homework = visibleHomework().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 4);
+  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(student.id)).slice(0, 2);
+  const checks = studentLessonChecks(student.id, currentLesson.number);
+  const doneChecks = checks.filter(Boolean).length;
+  return `
+    <div class="learning-shell">
+      <section class="learning-hero">
+        <div>
+          <p class="eyebrow">Планшетный кабинет ученика</p>
+          <h2>${student.name}</h2>
+          <span>${progress.title} · ${student.group} · урок ${progress.nextLesson}/${progress.total}</span>
+        </div>
+        <div class="learning-ring" style="--progress:${progress.percent}%">
+          <strong>${progress.percent}%</strong>
+          <small>программа</small>
+        </div>
+      </section>
+      ${
+        students.length > 1
+          ? `<label class="learning-student-switch">Ученик<select id="learningStudentSelect">${students.map((item) => `<option value="${item.id}" ${Number(item.id) === Number(student.id) ? "selected" : ""}>${item.name} · ${item.group}</option>`).join("")}</select></label>`
+          : ""
+      }
+      <div class="learning-grid">
+        <article class="card learning-main-card">
+          <div class="card-header">
+            <h3>Урок ${currentLesson.number}: ${currentLesson.title}</h3>
+            <span class="badge active">${doneChecks}/${currentLesson.checklist.length}</span>
+          </div>
+          <div class="learning-step-list">
+            ${learningBlock("Что изучаем", currentLesson.concept)}
+            ${learningBlock("Объяснение", currentLesson.explanation)}
+            ${learningBlock("Практика", currentLesson.practice)}
+          </div>
+          <div class="student-checklist">
+            ${currentLesson.checklist.map((item, index) => studentChecklistItem(student.id, currentLesson.number, index, item, checks[index])).join("")}
+          </div>
+        </article>
+        <aside class="learning-side">
+          <article class="card">
+            <div class="card-header"><h3>Маршрут</h3><span class="badge neutral">${completedLessons.length}/${STUDENT_LESSONS.length}</span></div>
+            <div class="lesson-map">
+              ${STUDENT_LESSONS.map((lesson) => lessonMapDot(lesson, progress.completed, currentLesson.number)).join("")}
+            </div>
+          </article>
+          <article class="card">
+            <div class="card-header"><h3>Домашка</h3><span class="badge neutral">${homework.length}</span></div>
+            <div class="card-body list">${homework.map((item) => homeworkRow(item)).join("") || `<div class="empty">Домашних заданий пока нет</div>`}</div>
+          </article>
+        </aside>
+      </div>
+      <div class="module-grid">
+        <article class="card">
+          <div class="card-header"><h3>Следующие уроки</h3><span class="badge soon">${progress.remaining} осталось</span></div>
+          <div class="learning-lesson-list">
+            ${upcomingLessons.map((lesson) => `<div class="list-row"><strong>${lesson.number}. ${lesson.title}</strong><small>${lesson.concept}</small></div>`).join("")}
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-header"><h3>Фидбек ментора</h3><span class="badge neutral">${feedback.length}</span></div>
+          <div class="card-body list">
+            ${feedback.map((note) => `<div class="feedback-note"><strong>${note.skill}</strong><small>${note.mentor} · ${formatDate(note.date)}</small><p>${note.text}</p></div>`).join("") || `<div class="empty">После урока ментор добавит подсказки.</div>`}
+          </div>
+        </article>
+      </div>
+    </div>
+  `;
+}
+
+function learningBlock(title, text) {
+  return `<section class="learning-block"><span>${title}</span><p>${text}</p></section>`;
+}
+
+function studentLessonChecks(studentId, lessonNumber) {
+  const saved = JSON.parse(localStorage.getItem(STUDENT_CHECKLIST_KEY) || "{}");
+  return saved[`${studentId}:${lessonNumber}`] || [];
+}
+
+function setStudentLessonCheck(studentId, lessonNumber, index, checked) {
+  const saved = JSON.parse(localStorage.getItem(STUDENT_CHECKLIST_KEY) || "{}");
+  const key = `${studentId}:${lessonNumber}`;
+  const checks = saved[key] || [];
+  checks[index] = checked;
+  saved[key] = checks;
+  localStorage.setItem(STUDENT_CHECKLIST_KEY, JSON.stringify(saved));
+}
+
+function studentChecklistItem(studentId, lessonNumber, index, text, checked) {
+  return `
+    <button class="student-check ${checked ? "done" : ""}" data-student-check="${studentId}:${lessonNumber}:${index}" type="button">
+      <span>${checked ? "✓" : index + 1}</span>
+      <strong>${text}</strong>
+    </button>`;
+}
+
+function lessonMapDot(lesson, completed, current) {
+  const stateClass = lesson.number <= completed ? "done" : lesson.number === current ? "current" : "";
+  return `<span class="lesson-dot ${stateClass}" title="Урок ${lesson.number}: ${lesson.title}">${lesson.number}</span>`;
 }
 
 function renderStudents() {
@@ -1948,7 +2113,7 @@ function scheduleLessonCard(lesson) {
         <small>${occupied}/${capacity} мест</small>
         <div class="row-actions">
           ${isAdmin() ? `<button class="button secondary compact" data-manage-schedule-slots="${lesson.id}" type="button">Слоты</button>` : ""}
-          ${!isParent() ? `<button class="button primary compact" data-lesson-report="${lesson.id}" type="button">Отчет</button>` : ""}
+          ${!isFamilyUser() ? `<button class="button primary compact" data-lesson-report="${lesson.id}" type="button">Отчет</button>` : ""}
           ${isAdmin() ? `<button class="button danger compact" data-delete-schedule="${lesson.id}" type="button">Удалить</button>` : ""}
         </div>
       </div>
@@ -2217,9 +2382,10 @@ function renderFeedback() {
   const certificates = visibleCertificates();
   return `
     <div class="toolbar">
-      ${isParent() ? `<button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>` : `<button class="button primary" data-add-feedback type="button">+ Фидбек</button>`}
-      ${!isParent() ? `<button class="button secondary" data-add-homework type="button">+ Домашка</button>` : ""}
-      ${!isParent() ? `<button class="button secondary" data-add-photo-report type="button">+ Фотоотчет</button>` : ""}
+      ${isParent() ? `<button class="button primary" data-add-parent-review type="button">+ Отзыв по уроку</button>` : ""}
+      ${!isFamilyUser() ? `<button class="button primary" data-add-feedback type="button">+ Фидбек</button>` : ""}
+      ${!isFamilyUser() ? `<button class="button secondary" data-add-homework type="button">+ Домашка</button>` : ""}
+      ${!isFamilyUser() ? `<button class="button secondary" data-add-photo-report type="button">+ Фотоотчет</button>` : ""}
       ${isAdmin() ? `<button class="button ghost" data-add-certificate type="button">Сертификат</button>` : ""}
       <span class="badge neutral">${notes.length} заметок</span>
       ${reviews.length ? `<span class="badge active">${reviews.length} отзывов родителей</span>` : ""}
@@ -2546,9 +2712,9 @@ function homeworkRow(item) {
       </div>
       <div class="row-actions">
         <span class="badge ${done ? "active" : "soon"}">${done ? "выполнено" : "задано"}</span>
-        ${isParent() && !done ? `<button class="button secondary compact" data-homework-done="${item.id}" type="button">Готово</button>` : ""}
-        ${!isParent() ? `<button class="button ghost compact" data-homework-toggle="${item.id}:${done ? "assigned" : "done"}" type="button">${done ? "Вернуть" : "Готово"}</button>` : ""}
-        ${!isParent() ? `<button class="button danger compact" data-delete-homework="${item.id}" type="button">Удалить</button>` : ""}
+        ${isFamilyUser() && !done ? `<button class="button secondary compact" data-homework-done="${item.id}" type="button">Готово</button>` : ""}
+        ${!isFamilyUser() ? `<button class="button ghost compact" data-homework-toggle="${item.id}:${done ? "assigned" : "done"}" type="button">${done ? "Вернуть" : "Готово"}</button>` : ""}
+        ${!isFamilyUser() ? `<button class="button danger compact" data-delete-homework="${item.id}" type="button">Удалить</button>` : ""}
       </div>
     </div>`;
 }
@@ -2562,7 +2728,7 @@ function photoReportCard(item) {
         <strong>${item.title}</strong>
         <small>${student?.name || "Ученик"} · ${item.mentor} · ${formatDate(item.date)}</small>
         <p>${item.text}</p>
-        ${!isParent() ? `<button class="button danger compact" data-delete-photo-report="${item.id}" type="button">Удалить</button>` : ""}
+        ${!isFamilyUser() ? `<button class="button danger compact" data-delete-photo-report="${item.id}" type="button">Удалить</button>` : ""}
       </div>
     </article>`;
 }
@@ -3141,6 +3307,18 @@ function bindViewActions() {
   document.querySelectorAll("[data-open-student]").forEach((button) => {
     button.addEventListener("click", () => openStudentProfile(Number(button.dataset.openStudent)));
   });
+  document.querySelector("#learningStudentSelect")?.addEventListener("change", (event) => {
+    localStorage.setItem("s7robotics-learning-student", event.target.value);
+    render();
+  });
+  document.querySelectorAll("[data-student-check]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [studentId, lessonNumber, index] = button.dataset.studentCheck.split(":").map(Number);
+      const checks = studentLessonChecks(studentId, lessonNumber);
+      setStudentLessonCheck(studentId, lessonNumber, index, !checks[index]);
+      render();
+    });
+  });
   document.querySelectorAll("[data-edit-student]").forEach((button) => {
     button.addEventListener("click", () => openStudentModal(Number(button.dataset.editStudent)));
   });
@@ -3313,7 +3491,7 @@ async function quickMarkAttendance(payload) {
   const [studentIdRaw] = String(payload).split(":");
   const studentId = Number(studentIdRaw);
   const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
-  if (!student || isParent()) return;
+  if (!student || isFamilyUser()) return;
   const item = {
     studentId: Number(studentId),
     date: nextAvailableAttendanceDate(studentId),
@@ -3397,7 +3575,7 @@ function openStudentProfile(studentId) {
           </div>
         </section>
         <section class="card">
-          <div class="card-header"><h3>Фидбек</h3>${!isParent() ? `<button class="button secondary" data-quick-feedback="${student.id}" type="button">Добавить</button>` : ""}</div>
+          <div class="card-header"><h3>Фидбек</h3>${!isFamilyUser() ? `<button class="button secondary" data-quick-feedback="${student.id}" type="button">Добавить</button>` : ""}</div>
           <div class="card-body list">
             ${
               feedback
@@ -4420,9 +4598,9 @@ function openUserModal() {
       <label>Телефон<input name="phone" placeholder="+7 777 000 00 00" /></label>
       <label>Email<input name="email" type="email" required placeholder="mentor@s7.kz" /></label>
       <label>Пароль<input name="password" type="password" required minlength="4" placeholder="Временный пароль" /></label>
-      <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="parent">Родитель</option><option value="admin">Админ</option></select></label>
+      <label>Роль<select name="role"><option value="mentor">Ментор</option><option value="parent">Родитель</option><option value="student">Ученик</option><option value="admin">Админ</option></select></label>
       <label style="grid-column:1/-1">Группы ментора<input name="groups" placeholder="A1, B2, Senior" /></label>
-      <label style="grid-column:1/-1">Дети родителя
+      <label style="grid-column:1/-1">Привязанные дети / ученик
         <select name="childIds" multiple size="5">
           ${state.students.map((student) => `<option value="${student.id}">${student.name} · ${student.group}</option>`).join("")}
         </select>
@@ -4453,7 +4631,7 @@ function openUserModal() {
       email,
       password: form.password,
       role: form.role,
-      groups: form.role === "mentor" ? form.groups.split(",").map((group) => group.trim()).filter(Boolean) : form.role === "parent" ? childIds : [],
+      groups: form.role === "mentor" ? form.groups.split(",").map((group) => group.trim()).filter(Boolean) : ["parent", "student"].includes(form.role) ? childIds : [],
       childIds,
     };
     if (backendEnabled) {
@@ -5128,7 +5306,7 @@ function openStudentModal(studentId = null) {
 }
 
 function openLessonModeModal(lessonId) {
-  if (isParent()) return;
+  if (isFamilyUser()) return;
   const lesson = visibleSchedule().find((item) => Number(item.id) === Number(lessonId));
   if (!lesson) return;
   const students = studentsForLesson(lesson);
@@ -5487,7 +5665,7 @@ function buildAfterLessonTasks(lesson, students, form, presentIds, hasReport, ha
 }
 
 function openStudentBadgeScanModal() {
-  if (isParent()) return;
+  if (isFamilyUser()) return;
   const scanned = new Map();
   let stream = null;
   let detector = null;
@@ -5624,6 +5802,7 @@ function studentIdFromBadgeValue(value) {
 }
 
 function openAttendanceModal(selectedStudentId = null) {
+  if (isFamilyUser()) return;
   openModal(
     "Новая отметка",
     `<form class="modal-form" id="attendanceForm">
@@ -5876,6 +6055,7 @@ function openPlannedExpensePaymentModal(expenseId) {
 }
 
 function openFeedbackModal(selectedStudentId = null) {
+  if (isFamilyUser()) return;
   openModal(
     "Фидбек ученику",
     `<form class="modal-form" id="feedbackForm">
@@ -5950,7 +6130,7 @@ function openParentReviewModal(selectedStudentId = null) {
 }
 
 function openHomeworkModal() {
-  if (isParent()) return;
+  if (isFamilyUser()) return;
   const students = visibleStudents();
   openModal(
     "Домашнее задание",
@@ -6009,7 +6189,7 @@ async function updateHomeworkStatus(homeworkId, status = "done") {
 }
 
 async function deleteHomework(homeworkId) {
-  if (isParent() || !confirm("Удалить домашнее задание?")) return;
+  if (isFamilyUser() || !confirm("Удалить домашнее задание?")) return;
   if (backendEnabled) {
     await apiRequest("delete_homework", { id: homeworkId });
     await refreshData();
@@ -6021,7 +6201,7 @@ async function deleteHomework(homeworkId) {
 }
 
 function openPhotoReportModal() {
-  if (isParent()) return;
+  if (isFamilyUser()) return;
   openModal(
     "Фотоотчет урока",
     `<form class="modal-form" id="photoReportForm">
@@ -6055,7 +6235,7 @@ function openPhotoReportModal() {
 }
 
 async function deletePhotoReport(reportId) {
-  if (isParent() || !confirm("Удалить фотоотчет?")) return;
+  if (isFamilyUser() || !confirm("Удалить фотоотчет?")) return;
   if (backendEnabled) {
     await apiRequest("delete_photo_report", { id: reportId });
     await refreshData();

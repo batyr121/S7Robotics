@@ -1805,6 +1805,175 @@ td small {
   text-align: right;
 }
 
+.learning-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.learning-hero {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid rgba(47, 111, 237, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(240, 247, 255, 0.96), rgba(255, 255, 255, 0.82)),
+    radial-gradient(circle at 90% 20%, rgba(54, 203, 167, 0.22), transparent 32%);
+  box-shadow: var(--shadow);
+}
+
+.learning-hero h2 {
+  margin: 4px 0 8px;
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 1.05;
+}
+
+.learning-hero span,
+.learning-student-switch {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.learning-ring {
+  width: 132px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, #fff 0 58%, transparent 59%),
+    conic-gradient(var(--blue-600) var(--progress), rgba(47, 111, 237, 0.12) 0);
+}
+
+.learning-ring strong,
+.learning-ring small {
+  grid-area: 1 / 1;
+}
+
+.learning-ring strong {
+  margin-top: -12px;
+  font-size: 28px;
+}
+
+.learning-ring small {
+  margin-top: 34px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.learning-student-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.learning-student-switch select {
+  min-width: 240px;
+}
+
+.learning-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+  gap: 18px;
+}
+
+.learning-step-list,
+.student-checklist,
+.lesson-map,
+.learning-lesson-list {
+  display: grid;
+  gap: 10px;
+}
+
+.learning-block {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.learning-block span {
+  display: block;
+  color: var(--blue-700);
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.learning-block p {
+  margin: 6px 0 0;
+  color: var(--ink);
+}
+
+.student-check {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.student-check span {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(47, 111, 237, 0.1);
+  color: var(--blue-700);
+  font-weight: 950;
+}
+
+.student-check.done {
+  border-color: rgba(18, 168, 122, 0.28);
+  background: rgba(18, 168, 122, 0.08);
+}
+
+.student-check.done span {
+  background: var(--green);
+  color: #fff;
+}
+
+.lesson-map {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.lesson-dot {
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.lesson-dot.done {
+  border-color: rgba(18, 168, 122, 0.25);
+  background: rgba(18, 168, 122, 0.12);
+  color: #08785a;
+}
+
+.lesson-dot.current {
+  border-color: rgba(47, 111, 237, 0.42);
+  background: rgba(47, 111, 237, 0.12);
+  color: var(--blue-700);
+}
+
 .kanban {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3360,6 +3529,7 @@ td small {
   }
 
   .module-grid,
+  .learning-grid,
   .kanban,
   .cashbox-grid,
   .cashbox-columns,
@@ -3402,6 +3572,12 @@ td small {
   .lesson-student-row,
   .lesson-feedback-row {
     grid-template-columns: 1fr;
+  }
+
+  .learning-side {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
   }
 
   .lesson-mode-hero,
@@ -3520,6 +3696,23 @@ td small {
 
   .brand-logo {
     width: 52px;
+  }
+
+  .learning-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .learning-hero h2 {
+    font-size: 28px;
+  }
+
+  .learning-side {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-map {
+    grid-template-columns: repeat(4, 1fr);
   }
 
   .brand {
