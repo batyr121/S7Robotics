@@ -1439,6 +1439,24 @@ select {
   gap: 12px;
 }
 
+.forecast-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.forecast-title {
+  margin-top: 16px;
+}
+
+.forecast-payment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.forecast-payment-row > div:nth-child(2) {
+  text-align: right;
+}
+
 .cashbox-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3884,6 +3902,15 @@ td small {
   .kanban,
   .profile-sections {
     grid-template-columns: 1fr;
+  }
+
+  .forecast-payment-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .forecast-payment-row > div:nth-child(2) {
+    text-align: left;
   }
 
   .stats-grid {

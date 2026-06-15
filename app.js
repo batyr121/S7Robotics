@@ -408,6 +408,20 @@ function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function isoDate(date = new Date()) {
+  const copy = new Date(date);
+  copy.setHours(12, 0, 0, 0);
+  return copy.toISOString().slice(0, 10);
+}
+
+function daysBetween(from, to) {
+  const start = new Date(from);
+  const end = new Date(to);
+  start.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
+  return Math.round((end - start) / 86400000);
+}
+
 function studentSubscriptionAmount(student) {
   const saved = Number(student.subscriptionAmount || 0);
   if (saved > 0) return saved;
@@ -433,6 +447,86 @@ function studentFinanceSummary(students = visibleStudents()) {
     monthPaid,
     control,
     average: activeStudents.length ? Math.round(expected / activeStudents.length) : 0,
+  };
+}
+
+function forecastLessonDays(group) {
+  const map = new Map([
+    ["Вс", 0],
+    ["Пн", 1],
+    ["Вт", 2],
+    ["Ср", 3],
+    ["Чт", 4],
+    ["Пт", 5],
+    ["Сб", 6],
+  ]);
+  const scheduled = new Set(
+    (state.schedule || [])
+      .filter((lesson) => lesson.group === group)
+      .map((lesson) => map.get(lesson.day))
+      .filter((day) => day !== undefined),
+  );
+  if (scheduled.size) return scheduled;
+  return new Set([2, 5]);
+}
+
+function addLessonsByCadence(fromDate, lessonCount, group) {
+  if (lessonCount <= 0) return isoDate(fromDate);
+  const lessonDays = forecastLessonDays(group);
+  const cursor = new Date(fromDate);
+  cursor.setHours(12, 0, 0, 0);
+  let count = 0;
+  for (let i = 0; i < 180; i += 1) {
+    if (i > 0) cursor.setDate(cursor.getDate() + 1);
+    if (lessonDays.has(cursor.getDay())) {
+      count += 1;
+      if (count === lessonCount) return isoDate(cursor);
+    }
+  }
+  return isoDate(cursor);
+}
+
+function studentPaymentForecast(student, fromDate = new Date()) {
+  const sub = subscriptionStatus(student);
+  const amount = studentSubscriptionAmount(student);
+  if (student.status === "pause" || amount <= 0) return null;
+  const lessonsUntilPayment = Math.max(0, sub.remaining);
+  const dueDate = addLessonsByCadence(fromDate, lessonsUntilPayment, student.group);
+  const reminderLessons = Math.max(0, lessonsUntilPayment - 1);
+  const reminderDate = addLessonsByCadence(fromDate, reminderLessons, student.group);
+  return {
+    student,
+    sub,
+    amount,
+    dueDate,
+    reminderDate,
+    daysLeft: Math.max(0, daysBetween(fromDate, dueDate)),
+    lessonsUntilPayment,
+    nextSubscriptionNumber: sub.currentSubscriptionNumber + (sub.expired ? 0 : 1),
+  };
+}
+
+function paymentForecast(students = state.students) {
+  const items = students
+    .map((student) => studentPaymentForecast(student))
+    .filter(Boolean)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.student.name.localeCompare(b.student.name));
+  const today = isoDate();
+  const currentMonth = currentMonthKey();
+  const next7 = items.filter((item) => item.daysLeft <= 7);
+  const next30 = items.filter((item) => item.daysLeft <= 30);
+  const monthItems = items.filter((item) => String(item.dueDate).startsWith(currentMonth));
+  const sum = (list) => list.reduce((total, item) => total + Number(item.amount || 0), 0);
+  return {
+    items,
+    today,
+    next7,
+    next30,
+    monthItems,
+    next7Total: sum(next7),
+    next30Total: sum(next30),
+    monthTotal: sum(monthItems),
+    nearest: items[0] || null,
   };
 }
 
@@ -1061,6 +1155,7 @@ function renderDashboard() {
     : 0;
   const present = attendance.filter((item) => item.status === "present").length;
   const subAlerts = isAdmin() ? adminSubscriptionAlerts().length : 0;
+  const forecast = isAdmin() ? paymentForecast(state.students) : null;
 
   return `
     ${dashboardLanding(students.length, active, present)}
@@ -1079,6 +1174,7 @@ function renderDashboard() {
       ${stat("Посещений", present, "отмечено")}
       ${stat(isAdmin() ? "Выручка" : "Прогресс", isAdmin() ? formatMoney(revenue) : `${avgProgress}%`, isAdmin() ? `${due} оплат к контролю` : "средний по группам")}
       ${isAdmin() ? stat("Абонементы", subAlerts, "учеников на оплату") : ""}
+      ${isAdmin() ? stat("Прогноз 30 дней", formatMoney(forecast.next30Total), `${forecast.next30.length} оплат по графику`) : ""}
     </div>
     <div class="module-grid">
       <article class="card">
@@ -2243,6 +2339,7 @@ function renderPayments() {
   const expenses = (state.expenses || []).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
   const monthCash = monthExpenses();
   const monthIncome = studentFinanceSummary(state.students).monthPaid;
+  const forecast = paymentForecast(state.students);
   const net = paidTotal - expenses;
   const monthNet = monthIncome - monthCash.actualTotal;
   return `
@@ -2252,6 +2349,27 @@ function renderPayments() {
       ${stat("Расход", formatMoney(expenses), "траты центра")}
       ${stat("Остаток", formatMoney(net), "оплаты минус расходы")}
     </div>
+    <article class="card cashbox-card">
+      <div class="card-header">
+        <h3>Прогноз поступлений</h3>
+        <span class="badge active">2 занятия в неделю</span>
+      </div>
+      <div class="card-body">
+        <div class="cashbox-grid forecast-grid">
+          ${stat("7 дней", formatMoney(forecast.next7Total), `${forecast.next7.length} оплат`)}
+          ${stat("30 дней", formatMoney(forecast.next30Total), `${forecast.next30.length} оплат`)}
+          ${stat(monthLabel(), formatMoney(forecast.monthTotal), `${forecast.monthItems.length} оплат`)}
+          ${stat("Ближайшая", forecast.nearest ? formatDate(forecast.nearest.dueDate) : "нет", forecast.nearest ? forecast.nearest.student.name : "нет данных")}
+        </div>
+        <div class="section-title forecast-title">
+          <strong>Календарь ближайших оплат</strong>
+          <small>Считаем дату, когда закончатся оставшиеся занятия при ритме 2 посещения в неделю. Если у группы есть расписание, используем дни этой группы.</small>
+        </div>
+        <div class="list compact-list forecast-list">
+          ${forecast.items.slice(0, 12).map((item) => forecastPaymentRow(item)).join("") || `<div class="empty">Нет учеников с суммой абонемента для прогноза</div>`}
+        </div>
+      </div>
+    </article>
     <article class="card cashbox-card">
       <div class="card-header">
         <h3>Мини-касса · ${monthLabel()}</h3>
@@ -2305,6 +2423,25 @@ function renderPayments() {
       </article>
     </div>
   `;
+}
+
+function forecastPaymentRow(item) {
+  const urgency = item.sub.expired ? "overdue" : item.daysLeft <= 7 ? "soon" : "neutral";
+  const lessonsLabel = item.sub.expired
+    ? "абонемент закончился"
+    : `${item.sub.remaining} занятий осталось · напомнить ${formatDate(item.reminderDate)}`;
+  return `
+    <div class="list-row forecast-payment-row">
+      <div>
+        <strong>${item.student.name}</strong>
+        <small>${item.student.group} · ${lessonsLabel}</small>
+      </div>
+      <div>
+        <strong>${formatMoney(item.amount)}</strong>
+        <small>ожидаем ${formatDate(item.dueDate)}</small>
+      </div>
+      <span class="badge ${urgency}">${item.sub.expired ? "срочно" : `${item.daysLeft} дн.`}</span>
+    </div>`;
 }
 
 function paymentRow(payment) {
