@@ -2110,6 +2110,81 @@ td small {
   box-shadow: 0 8px 18px hsl(var(--week-color) 70% 52% / 0.12);
 }
 
+.payment-check {
+  min-width: 132px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #f6f9fc;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.payment-check:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(24, 38, 65, 0.1);
+}
+
+.payment-check span:last-child {
+  display: grid;
+  gap: 1px;
+}
+
+.payment-check strong,
+.payment-check small {
+  display: block;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.payment-check small {
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+.payment-check-box {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: 8px;
+  font-weight: 950;
+}
+
+.payment-check.active {
+  border-color: rgba(18, 168, 122, 0.24);
+  background: rgba(18, 168, 122, 0.11);
+  color: #08785a;
+}
+
+.payment-check.active .payment-check-box {
+  background: #12a87a;
+  color: #fff;
+}
+
+.payment-check.missing {
+  border-color: rgba(226, 75, 91, 0.22);
+  background: rgba(226, 75, 91, 0.09);
+  color: #b02c3b;
+}
+
+.payment-check.missing .payment-check-box {
+  background: #fff;
+  color: #b02c3b;
+  box-shadow: inset 0 0 0 2px rgba(226, 75, 91, 0.26);
+}
+
 .mark {
   min-width: 30px;
   height: 30px;

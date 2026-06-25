@@ -712,6 +712,18 @@ function syncStudentSubscription(studentId) {
   return sub;
 }
 
+function paidSubscriptionRemaining(student, sub = subscriptionStatus(student)) {
+  return Math.max(0, studentPaidLessonTotal(student.id) - sub.used);
+}
+
+function hasAttendancePayment(student, sub = subscriptionStatus(student)) {
+  return paidSubscriptionRemaining(student, sub) > 0;
+}
+
+function isSubscriptionWarning(sub) {
+  return sub.currentCycleUsed >= 6 && sub.currentCycleUsed < 8;
+}
+
 function adminSubscriptionAlerts() {
   return visibleStudents().filter((student) => subscriptionStatus(student).needsPayment);
 }
@@ -2049,6 +2061,7 @@ function renderAttendance() {
               <th>Ученик</th>
               <th>Группа</th>
               <th>Абонемент</th>
+              ${isAdmin() ? `<th>Оплата</th>` : ""}
               <th>Неделя</th>
               ${Array.from({ length: 8 }, (_, index) => `<th>${index + 1}</th>`).join("")}
               <th>Итого</th>
@@ -2063,16 +2076,18 @@ function renderAttendance() {
                   const sub = subscriptionStatus(student);
                   const cells = currentSubscriptionCells(student, sub);
                   const weeklyCount = weeklyCounts.get(Number(student.id)) || 0;
+                  const warning = isSubscriptionWarning(sub);
                   const attendanceHint = sub.needsDirectorLetter
                     ? `НБ ${sub.absent}: письмо директору`
                     : sub.absent
                       ? `НБ ${sub.absent}/2 без списания`
                       : `${presentCount} посещений в истории`;
                   return `
-                    <tr class="attendance-week-row ${sub.remaining === 2 ? "attendance-warning-row" : ""}" style="--week-color:${weeklyAttendanceHue(weeklyCount)}">
+                    <tr class="attendance-week-row ${warning ? "attendance-warning-row" : ""}" style="--week-color:${weeklyAttendanceHue(weeklyCount)}">
                       <td><strong>${student.name}</strong><small>${student.course}</small></td>
                       <td>${student.group}<small>${student.mentor}</small></td>
                       <td>${subscriptionBadge(sub)}</td>
+                      ${isAdmin() ? `<td>${attendancePaymentToggle(student, sub)}</td>` : ""}
                       <td class="weekly-count-cell">${weeklyAttendanceBadge(weeklyCount)}<small>за неделю</small></td>
                       ${cells.map((record, index) => attendanceSlotCell(student.id, index, record)).join("")}
                       <td>
@@ -2085,7 +2100,7 @@ function renderAttendance() {
                       </td>
                     </tr>`;
                 })
-                .join("") || `<tr><td colspan="13"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
+                .join("") || `<tr><td colspan="${isAdmin() ? 14 : 13}"><div class="empty">Нет учеников в выбранной группе</div></td></tr>`
             }
           </tbody>
         </table>
@@ -2101,11 +2116,31 @@ function currentSubscriptionCells(student, sub = subscriptionStatus(student)) {
 }
 
 function subscriptionBadge(sub) {
+  const warning = isSubscriptionWarning(sub);
   return `
-    <div class="subscription-badge ${sub.expired ? "expired" : ""} ${sub.remaining === 2 ? "warning" : ""}">
+    <div class="subscription-badge ${sub.expired ? "expired" : ""} ${warning ? "warning" : ""}">
       <strong>#${sub.currentSubscriptionNumber}</strong>
-      <small>${sub.currentCycleUsed}/8${sub.remaining === 2 ? " · осталось 2" : ""}</small>
+      <small>${sub.currentCycleUsed}/8${warning ? " · оплата скоро" : ""}</small>
     </div>`;
+}
+
+function attendancePaymentToggle(student, sub = subscriptionStatus(student)) {
+  const active = hasAttendancePayment(student, sub);
+  const paidLeft = paidSubscriptionRemaining(student, sub);
+  const amount = studentSubscriptionAmount(student);
+  return `
+    <button
+      class="payment-check ${active ? "active" : "missing"}"
+      data-attendance-payment="${student.id}"
+      type="button"
+      title="${active ? "Оплата есть. Нажмите, чтобы добавить следующий абонемент." : "Оплаты нет. Нажмите, чтобы добавить 8 занятий."}"
+    >
+      <span class="payment-check-box">${active ? "✓" : "+"}</span>
+      <span>
+        <strong>${active ? "Оплата есть" : "Нет оплаты"}</strong>
+        <small>${active ? `${paidLeft} занятий` : amount ? `${formatMoney(amount)}` : "указать сумму"}</small>
+      </span>
+    </button>`;
 }
 
 function renderSchedule() {
@@ -3499,6 +3534,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-attendance-history]").forEach((button) => {
     button.addEventListener("click", () => openAttendanceHistoryModal(Number(button.dataset.attendanceHistory)));
   });
+  document.querySelectorAll("[data-attendance-payment]").forEach((button) => {
+    button.addEventListener("click", () => quickAttendancePayment(Number(button.dataset.attendancePayment)));
+  });
   document.querySelectorAll("[data-open-lesson-archive]").forEach((button) => {
     button.addEventListener("click", () => openLessonArchiveModal(Number(button.dataset.openLessonArchive)));
   });
@@ -3675,6 +3713,47 @@ async function toggleAttendance(payload) {
     state.attendance = state.attendance.filter((item) => item.id !== record.id);
   }
   syncStudentSubscription(studentId);
+  saveState();
+  render();
+}
+
+async function quickAttendancePayment(studentId) {
+  if (!isAdmin()) return;
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const sub = subscriptionStatus(student);
+  const amount = studentSubscriptionAmount(student);
+  if (!amount) {
+    openPaymentModal(studentId);
+    return;
+  }
+  const active = hasAttendancePayment(student, sub);
+  if (active && !confirm(`У ${student.name} еще ${paidSubscriptionRemaining(student, sub)} оплаченных занятий. Добавить следующий абонемент?`)) {
+    return;
+  }
+  const payload = {
+    studentId: Number(studentId),
+    plan: "8 занятий",
+    amount: Number(amount),
+    status: "paid",
+    date: isoDate(new Date()),
+  };
+  if (backendEnabled) {
+    try {
+      await apiRequest("create_payment", payload);
+      await refreshData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  state.payments.unshift({
+    ...payload,
+    id: Date.now(),
+  });
+  student.subscriptionAmount = Number(amount);
+  student.nextPayment = payload.date;
+  syncStudentSubscription(student.id);
   saveState();
   render();
 }
