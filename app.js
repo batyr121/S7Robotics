@@ -591,8 +591,8 @@ function studentPayments(studentId) {
 }
 
 function paymentVisitCount(plan = "") {
-  const match = String(plan).match(/\d+/);
-  if (match) return Math.max(1, Number(match[0]));
+  const match = String(plan).match(/[+-]?\d+/);
+  if (match) return Number(match[0]);
   return String(plan).toLowerCase().includes("проб") ? 1 : 8;
 }
 
@@ -674,7 +674,8 @@ function subscriptionStatus(student) {
   const startDate = earliestDate(paymentStartDate, earliestAttendanceDate(student.id));
   const usage = attendanceSubscriptionUsage(student.id, startDate);
   const manualSubscription = Math.max(1, Number(student.subscriptionNumber || 1));
-  const totalLessons = Math.max(8, studentPaidLessonTotal(student.id) || Number(student.lessonsLeft || 0) + usage.used);
+  const paidLessons = studentPaidLessonTotal(student.id);
+  const totalLessons = payments.length ? Math.max(0, paidLessons) : Math.max(8, Number(student.lessonsLeft || 0) + usage.used);
   const used = Math.min(usage.used, totalLessons);
   const remaining = Math.max(0, totalLessons - used);
   const completedCycles = Math.floor(used / 8);
@@ -2094,6 +2095,7 @@ function renderAttendance() {
                         <strong>${sub.totalProgressVisits}</strong>
                         <small>${sub.needsPayment ? `пора на оплату · ${attendanceHint}` : attendanceHint}</small>
                         <div class="row-actions">
+                          ${isAdmin() ? `<button class="button ghost compact" data-adjust-paid-lessons="${student.id}" type="button">Оплач. дни</button>` : ""}
                           <button class="button ghost compact" data-parent-messages="${student.id}" type="button">Сообщения</button>
                           <button class="button ghost compact" data-attendance-history="${student.id}" type="button">История</button>
                         </div>
@@ -3537,6 +3539,9 @@ function bindViewActions() {
   document.querySelectorAll("[data-attendance-payment]").forEach((button) => {
     button.addEventListener("click", () => quickAttendancePayment(Number(button.dataset.attendancePayment)));
   });
+  document.querySelectorAll("[data-adjust-paid-lessons]").forEach((button) => {
+    button.addEventListener("click", () => openPaidLessonsModal(Number(button.dataset.adjustPaidLessons)));
+  });
   document.querySelectorAll("[data-open-lesson-archive]").forEach((button) => {
     button.addEventListener("click", () => openLessonArchiveModal(Number(button.dataset.openLessonArchive)));
   });
@@ -3756,6 +3761,77 @@ async function quickAttendancePayment(studentId) {
   syncStudentSubscription(student.id);
   saveState();
   render();
+}
+
+function openPaidLessonsModal(studentId) {
+  if (!isAdmin()) return;
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const sub = subscriptionStatus(student);
+  const paidTotal = studentPaidLessonTotal(student.id);
+  openModal(
+    `Оплаченные занятия · ${student.name}`,
+    `<form class="modal-form" id="paidLessonsForm">
+      <div class="profile-summary" style="grid-column:1/-1">
+        ${stat("Оплачено", paidTotal, "занятий")}
+        ${stat("Использовано", sub.used, `${sub.currentCycleUsed}/8 в текущем абонементе`)}
+        ${stat("Осталось", paidSubscriptionRemaining(student, sub), sub.needsPayment ? "нужна оплата" : "активно")}
+      </div>
+      <label>Добавить / убрать занятия
+        <input name="delta" type="number" required min="-40" max="40" step="1" placeholder="Например 2 или -1" />
+      </label>
+      <label>Дата
+        <input name="date" type="date" required value="${isoDate(new Date())}" />
+      </label>
+      <label style="grid-column:1/-1">Причина
+        <textarea name="reason" required placeholder="Например: бонус, ошибка оплаты, перенос занятия, ручная корректировка"></textarea>
+      </label>
+      <div class="form-note" style="grid-column:1/-1">Плюс добавит оплаченные занятия, минус уберет лишние. Деньги не меняются, это только корректировка количества занятий.</div>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сохранить корректировку</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#paidLessonsForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const delta = Number(data.delta);
+    if (!Number.isInteger(delta) || delta === 0) {
+      alert("Укажите целое число занятий: например 2 или -1.");
+      return;
+    }
+    const currentPaidLeft = paidSubscriptionRemaining(student, subscriptionStatus(student));
+    if (delta < 0 && Math.abs(delta) > currentPaidLeft && !confirm(`У ученика осталось ${currentPaidLeft} оплаченных занятий. Все равно убрать ${Math.abs(delta)}?`)) {
+      return;
+    }
+    const plan = `${delta > 0 ? "+" : ""}${delta} занятий · корректировка: ${String(data.reason || "").trim()}`;
+    const payload = {
+      studentId: Number(student.id),
+      plan,
+      amount: 0,
+      status: "paid",
+      date: data.date,
+    };
+    if (backendEnabled) {
+      try {
+        await apiRequest("create_payment", payload);
+        closeModal();
+        await refreshData();
+      } catch (error) {
+        alert(error.message);
+      }
+      return;
+    }
+    state.payments.unshift({
+      ...payload,
+      id: Date.now(),
+    });
+    syncStudentSubscription(student.id);
+    saveState();
+    closeModal();
+    render();
+  });
 }
 
 function openStudentProfile(studentId) {

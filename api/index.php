@@ -614,8 +614,11 @@ function create_payment(PDO $pdo, array $admin, array $input): void
         $input['status'] ?? 'paid',
         $date,
     ]);
-    $stmt = $pdo->prepare('update students set subscription_amount = ? where id = ?');
-    $stmt->execute([(int)required($input, 'amount'), $studentId]);
+    $amount = (int)required($input, 'amount');
+    if ($amount > 0) {
+        $stmt = $pdo->prepare('update students set subscription_amount = ? where id = ?');
+        $stmt->execute([$amount, $studentId]);
+    }
     if (($input['status'] ?? 'paid') === 'paid') {
         $visits = plan_visits((string)$input['plan']);
         $stmt = $pdo->prepare('update students set lessons_left = lessons_left + ?, next_payment = ? where id = ?');
@@ -627,8 +630,8 @@ function create_payment(PDO $pdo, array $admin, array $input): void
 
 function plan_visits(string $plan): int
 {
-    if (preg_match('/(\d+)/u', $plan, $matches)) {
-        return max(1, (int)$matches[1]);
+    if (preg_match('/([+-]?\d+)/u', $plan, $matches)) {
+        return (int)$matches[1];
     }
     if (preg_match('/проб/ui', $plan)) {
         return 1;
@@ -888,6 +891,9 @@ function toggle_attendance(PDO $pdo, array $user, array $input): void
 function recalc_student_subscription(PDO $pdo, int $studentId): void
 {
     $paidTotal = paid_lessons_total($pdo, $studentId);
+    $stmt = $pdo->prepare('select count(*) from payments where student_id = ? and status = ?');
+    $stmt->execute([$studentId, 'paid']);
+    $paymentCount = (int)$stmt->fetchColumn();
     $stmt = $pdo->prepare('select status from attendance where student_id = ? order by date asc, id asc');
     $stmt->execute([$studentId]);
     $present = 0;
@@ -901,7 +907,7 @@ function recalc_student_subscription(PDO $pdo, int $studentId): void
         }
     }
     $used = $present + max(0, $absent - 2);
-    $totalLessons = max(8, $paidTotal);
+    $totalLessons = $paymentCount > 0 ? max(0, $paidTotal) : max(8, $paidTotal);
     $lessonsLeft = max(0, $totalLessons - $used);
 
     $stmt = $pdo->prepare('update students set lessons_left = ? where id = ?');
