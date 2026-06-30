@@ -124,6 +124,7 @@ const statusText = {
   active: "Активен",
   trial: "Пробное",
   pause: "Пауза",
+  archived: "Архив",
   paid: "Оплачен",
   soon: "Скоро",
   overdue: "Просрочен",
@@ -316,13 +317,14 @@ function canUse(view) {
 
 function visibleStudents() {
   if (!currentUser) return [];
-  if (isAdmin()) return state.students;
+  const activeStudents = state.students.filter((student) => student.status !== "archived");
+  if (isAdmin()) return activeStudents;
   if (isFamilyUser()) {
     const ids = new Set((currentUser.groups || []).map((id) => Number(id)));
-    return state.students.filter((student) => ids.has(Number(student.id)));
+    return activeStudents.filter((student) => ids.has(Number(student.id)));
   }
   const groups = new Set(currentUser.groups || []);
-  return state.students.filter((student) => groups.has(student.group) || student.mentor === currentUser.name);
+  return activeStudents.filter((student) => groups.has(student.group) || student.mentor === currentUser.name);
 }
 
 function visibleStudentIds() {
@@ -391,6 +393,19 @@ function visibleParentReviews() {
 function filteredStudents() {
   const term = searchTerm.trim().toLowerCase();
   const students = visibleStudents();
+  if (!term) return students;
+  return students.filter((student) =>
+    [student.name, student.course, student.group, student.parent, student.phone, student.mentor]
+      .join(" ")
+      .toLowerCase()
+      .includes(term),
+  );
+}
+
+function archivedStudents() {
+  if (!isAdmin()) return [];
+  const term = searchTerm.trim().toLowerCase();
+  const students = state.students.filter((student) => student.status === "archived");
   if (!term) return students;
   return students.filter((student) =>
     [student.name, student.course, student.group, student.parent, student.phone, student.mentor]
@@ -1911,6 +1926,7 @@ function lessonMapDot(lesson, completed, current) {
 
 function renderStudents() {
   const students = filteredStudents();
+  const archive = archivedStudents();
   const finance = studentFinanceSummary(students);
   const groupFinance = uniqueGroups()
     .map((group) => {
@@ -2001,6 +2017,7 @@ function renderStudents() {
                             ? `<button class="button ${student.status === "pause" ? "primary" : "ghost"} compact" data-toggle-freeze-student="${student.id}" type="button">${student.status === "pause" ? "Разморозить" : "Заморозка"}</button>`
                             : ""
                         }
+                        ${isAdmin() ? `<button class="button ghost compact" data-archive-student="${student.id}" type="button">В архив</button>` : ""}
                         ${isAdmin() ? `<button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>` : ""}
                       </div>
                     </td>
@@ -2012,6 +2029,55 @@ function renderStudents() {
         </table>
       </div>
     </article>
+    ${
+      isAdmin()
+        ? `<article class="card archive-card">
+            <div class="card-header">
+              <h3>Архив учеников</h3>
+              <span class="badge archived">${archive.length} записей</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ученик</th>
+                    <th>Курс</th>
+                    <th>Родитель</th>
+                    <th>Ментор</th>
+                    <th>Итог</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    archive
+                      .map((student) => {
+                        const sub = subscriptionStatus(student);
+                        return `
+                          <tr>
+                            <td><strong>${student.name}</strong><small>${student.group} · ${student.phone}</small></td>
+                            <td>${programProgress(student).title}<small>${programProgress(student).completed}/34 уроков</small></td>
+                            <td>${student.parent}</td>
+                            <td>${student.mentor}</td>
+                            <td><strong>${sub.totalProgressVisits} посещений</strong><small>#${sub.currentSubscriptionNumber} · ${sub.visitLabel} · ${sub.remaining} осталось</small></td>
+                            <td>
+                              <div class="row-actions">
+                                <button class="button ghost compact" data-open-student="${student.id}" type="button">Профиль</button>
+                                <button class="button secondary compact" data-edit-student="${student.id}" type="button">Редактировать</button>
+                                <button class="button primary compact" data-restore-student="${student.id}" type="button">Вернуть</button>
+                                <button class="button danger compact" data-delete-student="${student.id}" type="button">Удалить</button>
+                              </div>
+                            </td>
+                          </tr>`;
+                      })
+                      .join("") || `<tr><td colspan="6"><div class="empty">В архиве пока нет учеников</div></td></tr>`
+                  }
+                </tbody>
+              </table>
+            </div>
+          </article>`
+        : ""
+    }
   `;
 }
 
@@ -3500,6 +3566,12 @@ function bindViewActions() {
   document.querySelectorAll("[data-toggle-freeze-student]").forEach((button) => {
     button.addEventListener("click", () => toggleStudentFreeze(Number(button.dataset.toggleFreezeStudent)));
   });
+  document.querySelectorAll("[data-archive-student]").forEach((button) => {
+    button.addEventListener("click", () => archiveStudent(Number(button.dataset.archiveStudent)));
+  });
+  document.querySelectorAll("[data-restore-student]").forEach((button) => {
+    button.addEventListener("click", () => restoreStudent(Number(button.dataset.restoreStudent)));
+  });
   document.querySelectorAll("[data-delete-student]").forEach((button) => {
     button.addEventListener("click", () => deleteStudent(Number(button.dataset.deleteStudent)));
   });
@@ -3835,10 +3907,13 @@ function openPaidLessonsModal(studentId) {
 }
 
 function openStudentProfile(studentId) {
-  const student = visibleStudents().find((item) => Number(item.id) === Number(studentId));
+  const source = isAdmin() ? state.students : visibleStudents();
+  const student = source.find((item) => Number(item.id) === Number(studentId));
   if (!student) return;
-  const attendance = visibleAttendance().filter((item) => Number(item.studentId) === Number(studentId));
-  const feedback = visibleFeedback().filter((item) => Number(item.studentId) === Number(studentId));
+  const attendanceSource = isAdmin() ? state.attendance : visibleAttendance();
+  const feedbackSource = isAdmin() ? state.feedback : visibleFeedback();
+  const attendance = attendanceSource.filter((item) => Number(item.studentId) === Number(studentId));
+  const feedback = feedbackSource.filter((item) => Number(item.studentId) === Number(studentId));
   const payments = isAdmin() ? state.payments.filter((item) => Number(item.studentId) === Number(studentId)) : [];
   const present = attendance.filter((item) => item.status === "present").length;
   const sub = subscriptionStatus(student);
@@ -5311,6 +5386,38 @@ async function toggleStudentFreeze(studentId) {
   student.status = payload.status;
   saveState();
   render();
+}
+
+async function setStudentStatus(studentId, status) {
+  if (!isAdmin()) return;
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  const payload = {
+    ...student,
+    group: student.group,
+    paymentDate: student.nextPayment || new Date().toISOString().slice(0, 10),
+    status,
+  };
+  if (backendEnabled) {
+    await apiRequest("update_student", payload);
+    await refreshData();
+    return;
+  }
+  student.status = status;
+  saveState();
+  render();
+}
+
+async function archiveStudent(studentId) {
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student || !confirm(`Переместить "${student.name}" в архив? История, оплаты и посещения сохранятся.`)) return;
+  await setStudentStatus(studentId, "archived");
+}
+
+async function restoreStudent(studentId) {
+  const student = state.students.find((item) => Number(item.id) === Number(studentId));
+  if (!student || !confirm(`Вернуть "${student.name}" в основной список?`)) return;
+  await setStudentStatus(studentId, "active");
 }
 
 async function updateTrialStatus(trialId, status) {

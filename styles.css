@@ -1657,6 +1657,16 @@ td small {
   color: var(--muted);
 }
 
+.badge.archived {
+  border-color: rgba(124, 139, 160, 0.24);
+  background: rgba(124, 139, 160, 0.12);
+  color: #607086;
+}
+
+.archive-card {
+  border-style: dashed;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
