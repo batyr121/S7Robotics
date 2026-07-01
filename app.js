@@ -2097,6 +2097,7 @@ function renderAttendance() {
         ${!isParent() ? `<button class="button primary" data-add-attendance type="button">+ Отметка</button>` : ""}
         ${!isParent() ? `<button class="button secondary" data-scan-student-badges type="button">Скан бейджей</button>` : ""}
         ${!isParent() ? `<button class="button secondary" data-unified-qr type="button">Единый QR</button>` : `<button class="button primary" data-open-parent-qr-scan type="button">Сканировать QR</button>`}
+        ${isAdmin() ? `<button class="button secondary" data-open-mentor-journal type="button">Журнал ментора</button>` : ""}
         <button class="button secondary" data-print-attendance type="button">Печать ведомости</button>
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
         <label class="inline-filter">Группа
@@ -3713,6 +3714,7 @@ function bindViewActions() {
   document.querySelector("[data-add-announcement]")?.addEventListener("click", () => openAnnouncementModal());
   document.querySelector("[data-edit-family-config]")?.addEventListener("click", () => openFamilyConfigModal());
   document.querySelector("[data-print-attendance]")?.addEventListener("click", printAttendanceSheet);
+  document.querySelector("[data-open-mentor-journal]")?.addEventListener("click", openMentorJournalModal);
   document.querySelector("[data-export-attendance]")?.addEventListener("click", exportAttendanceCsv);
   document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
   document.querySelector("#attendanceGroupFilter")?.addEventListener("change", (event) => {
@@ -6749,6 +6751,226 @@ function printAttendanceSheet() {
   win.document.close();
   win.focus();
   win.print();
+}
+
+function openMentorJournalModal() {
+  if (!isAdmin()) return;
+  const today = new Date();
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+  openModal(
+    "Бумажный журнал ментора",
+    `<form class="modal-form" id="mentorJournalForm">
+      <label>Ментор<select name="mentor" required>${mentorOptions()}</select></label>
+      <label>С даты<input name="from" type="date" required value="${isoDate(nextMonthStart)}" /></label>
+      <label>По дату<input name="to" type="date" required value="${isoDate(nextMonthEnd)}" /></label>
+      <label>Формат
+        <select name="mode">
+          <option value="group">Страницы по группам</option>
+          <option value="compact">Компактный общий список</option>
+        </select>
+      </label>
+      <div class="form-note" style="grid-column:1/-1">CRM возьмет активных учеников выбранного ментора, его расписание за период и соберет альбомный журнал для печати или сохранения в PDF.</div>
+      <div class="form-actions">
+        <button class="button ghost" data-close-modal type="button">Отмена</button>
+        <button class="button primary" type="submit">Сформировать журнал</button>
+      </div>
+    </form>`,
+  );
+  modalRoot.querySelector("#mentorJournalForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    if (data.from > data.to) {
+      alert("Дата начала не может быть позже даты окончания.");
+      return;
+    }
+    closeModal();
+    printMentorJournal(data);
+  });
+}
+
+function journalDateRange(from, to) {
+  const dates = [];
+  const cursor = new Date(from);
+  const end = new Date(to);
+  cursor.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
+  for (let i = 0; cursor <= end && i < 370; i += 1) {
+    dates.push(isoDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function journalLessonsForGroup(mentor, group, from, to) {
+  const dayMap = new Map([
+    [0, "Вс"],
+    [1, "Пн"],
+    [2, "Вт"],
+    [3, "Ср"],
+    [4, "Чт"],
+    [5, "Пт"],
+    [6, "Сб"],
+  ]);
+  const lessons = (state.schedule || [])
+    .filter((lesson) => lesson.mentor === mentor && lesson.group === group)
+    .sort((a, b) => scheduleDayOrder(a.day) - scheduleDayOrder(b.day) || String(a.time || "").localeCompare(String(b.time || "")));
+  if (!lessons.length) return [];
+  return journalDateRange(from, to).flatMap((date) => {
+    const day = dayMap.get(new Date(date).getDay());
+    return lessons
+      .filter((lesson) => lesson.day === day)
+      .map((lesson) => ({
+        date,
+        day,
+        time: lesson.time || "",
+        topic: "",
+      }));
+  });
+}
+
+function printMentorJournal({ mentor, from, to, mode }) {
+  const mentorStudents = state.students
+    .filter((student) => student.status !== "archived" && student.mentor === mentor)
+    .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
+  const groups = [...new Set(mentorStudents.map((student) => student.group))].sort();
+  const pages = groups.map((group) => {
+    const students = mentorStudents.filter((student) => student.group === group);
+    const lessons = journalLessonsForGroup(mentor, group, from, to);
+    return { group, students, lessons };
+  });
+  const totalLessons = pages.reduce((sum, page) => sum + page.lessons.length, 0);
+  const win = window.open("", "_blank", "width=1200,height=800");
+  if (!win) return;
+  win.document.write(`
+    <html>
+      <head>
+        <title>S7 Robotics · журнал ${escapeHtml(mentor)}</title>
+        <style>
+          @page { size: A4 landscape; margin: 9mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; color: #10233f; font-family: Arial, sans-serif; background: #fff; }
+          .journal-cover, .journal-page { page-break-after: always; padding: 0; }
+          .journal-cover { min-height: 185mm; display: grid; grid-template-columns: 1.35fr .65fr; gap: 18px; align-items: stretch; }
+          .cover-main { border: 2px solid #1d6fe8; border-radius: 18px; padding: 22px; background: linear-gradient(135deg,#f7fbff,#eef6ff); }
+          .cover-main h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: 0; }
+          .cover-main p { margin: 0; color: #5f6f84; font-size: 14px; }
+          .cover-meta { display: grid; gap: 10px; margin-top: 22px; grid-template-columns: repeat(2,1fr); }
+          .cover-meta div, .cover-side div { border: 1px solid #cfdceb; border-radius: 12px; padding: 12px; background: #fff; }
+          .cover-meta strong, .cover-side strong { display: block; font-size: 20px; }
+          .cover-meta small, .cover-side small { color: #5f6f84; }
+          .cover-side { display: grid; gap: 10px; align-content: start; }
+          .journal-page h2 { margin: 0; font-size: 22px; }
+          .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:10px; }
+          .page-head p { margin: 3px 0 0; color:#5f6f84; font-size:12px; }
+          .badge { display:inline-block; border:1px solid #cfdceb; border-radius:999px; padding:5px 9px; color:#1d6fe8; background:#eef6ff; font-weight:700; font-size:11px; }
+          table { width:100%; border-collapse:collapse; table-layout:fixed; }
+          th, td { border:1px solid #b9c9dc; padding:5px 6px; vertical-align:top; font-size:10.5px; }
+          th { background:#eef6ff; text-align:left; color:#23466f; }
+          .students th:nth-child(1), .students td:nth-child(1) { width: 28px; text-align:center; }
+          .students th:nth-child(2), .students td:nth-child(2) { width: 24%; }
+          .students th:nth-child(3), .students td:nth-child(3) { width: 9%; text-align:center; }
+          .students th:nth-child(4), .students td:nth-child(4) { width: 12%; }
+          .students th:nth-child(5), .students td:nth-child(5) { width: 12%; }
+          .students th:nth-child(6), .students td:nth-child(6) { width: 18%; }
+          .students th:nth-child(7), .students td:nth-child(7) { width: auto; }
+          .mark-box { height: 20px; border:1px dashed #90a8c2; border-radius:5px; margin-top:3px; }
+          .lesson-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px; }
+          .lesson-card { break-inside:avoid; border:1px solid #b9c9dc; border-radius:10px; padding:8px; min-height:72px; }
+          .lesson-card strong { display:block; margin-bottom:5px; }
+          .line { border-bottom:1px solid #b9c9dc; height:16px; margin-top:4px; }
+          .summary { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:10px; }
+          .summary div { border:1px solid #b9c9dc; border-radius:10px; padding:8px; min-height:48px; }
+          .compact-page .journal-page { page-break-after:auto; }
+          @media print { .journal-page:last-child { page-break-after:auto; } }
+        </style>
+      </head>
+      <body class="${mode === "compact" ? "compact-page" : ""}">
+        ${mentorJournalCover(mentor, from, to, pages, totalLessons)}
+        ${
+          pages.length
+            ? pages.map((page, index) => mentorJournalPage(page, mentor, from, to, index + 1, pages.length)).join("")
+            : `<section class="journal-page"><div class="page-head"><div><h2>Нет учеников</h2><p>У ментора ${escapeHtml(mentor)} нет активных учеников в CRM.</p></div></div></section>`
+        }
+      </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+}
+
+function mentorJournalCover(mentor, from, to, pages, totalLessons) {
+  const studentCount = pages.reduce((sum, page) => sum + page.students.length, 0);
+  return `
+    <section class="journal-cover">
+      <div class="cover-main">
+        <h1>S7 Robotics · бумажный журнал</h1>
+        <p>Журнал посещаемости, темы уроков, фидбека родителям и итогового отчета ментора.</p>
+        <div class="cover-meta">
+          <div><small>Ментор</small><strong>${escapeHtml(mentor)}</strong></div>
+          <div><small>Период</small><strong>${formatDate(from)} - ${formatDate(to)}</strong></div>
+          <div><small>Групп</small><strong>${pages.length}</strong></div>
+          <div><small>Учеников</small><strong>${studentCount}</strong></div>
+        </div>
+      </div>
+      <aside class="cover-side">
+        <div><small>Плановых уроков</small><strong>${totalLessons}</strong></div>
+        <div><small>Правила отметок</small><p>Б = был, НБ = не был, О = опоздал. Фидбек заполняется коротко после урока.</p></div>
+        <div><small>Подпись администратора</small><p>________________________</p></div>
+      </aside>
+    </section>`;
+}
+
+function mentorJournalPage(page, mentor, from, to, pageNumber, totalPages) {
+  const rows = page.students
+    .map((student, index) => {
+      const sub = subscriptionStatus(student);
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeHtml(student.name)}</strong><br><small>${escapeHtml(student.parent)} · ${escapeHtml(student.phone)}</small></td>
+          <td>${sub.visitLabel}<div class="mark-box"></div></td>
+          <td><div class="mark-box"></div><small>Б / НБ / О</small></td>
+          <td><div class="mark-box"></div><small>балл / XP</small></td>
+          <td><div class="line"></div><div class="line"></div></td>
+          <td><div class="line"></div><div class="line"></div></td>
+        </tr>`;
+    })
+    .join("");
+  const lessonCards = (page.lessons.length ? page.lessons : [{ date: from, day: "", time: "", topic: "" }])
+    .map(
+      (lesson) => `
+        <div class="lesson-card">
+          <strong>${formatDate(lesson.date)} ${escapeHtml(lesson.day)} ${escapeHtml(lesson.time)}</strong>
+          <span>Тема урока:</span><div class="line"></div>
+          <span>Что отработали:</span><div class="line"></div>
+          <span>Домашка / рекомендация:</span><div class="line"></div>
+        </div>`,
+    )
+    .join("");
+  return `
+    <section class="journal-page">
+      <div class="page-head">
+        <div>
+          <h2>${escapeHtml(page.group)} · ${escapeHtml(mentor)}</h2>
+          <p>${formatDate(from)} - ${formatDate(to)} · страница ${pageNumber}/${totalPages}</p>
+        </div>
+        <span class="badge">${page.students.length} учеников · ${page.lessons.length} уроков</span>
+      </div>
+      <table class="students">
+        <thead>
+          <tr><th>№</th><th>Ученик</th><th>Абон.</th><th>Посещ.</th><th>Работа</th><th>Фидбек родителю</th><th>Комментарий ментора</th></tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="7">В группе нет активных учеников</td></tr>`}</tbody>
+      </table>
+      <div class="lesson-grid">${lessonCards}</div>
+      <div class="summary">
+        <div><strong>Итог уроков / месяца</strong><div class="line"></div><div class="line"></div></div>
+        <div><strong>Кому нужен звонок</strong><div class="line"></div><div class="line"></div></div>
+        <div><strong>Подпись ментора</strong><div class="line"></div><div class="line"></div></div>
+      </div>
+    </section>`;
 }
 
 function openAnnouncementModal() {
