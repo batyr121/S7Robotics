@@ -151,6 +151,8 @@ let backendEnabled = false;
 let activeView = "dashboard";
 let searchTerm = "";
 let attendanceGroup = "all";
+let studentsProgramFilter = "all";
+let attendanceProgramFilter = "all";
 let pendingParentQrScan = new URLSearchParams(window.location.search).get("scan") === "attendance";
 let parentQrScanHandled = false;
 let lessonTimerId = null;
@@ -392,7 +394,7 @@ function visibleParentReviews() {
 
 function filteredStudents() {
   const term = searchTerm.trim().toLowerCase();
-  const students = visibleStudents();
+  const students = filterStudentsByProgram(visibleStudents(), studentsProgramFilter);
   if (!term) return students;
   return students.filter((student) =>
     [student.name, student.course, student.group, student.parent, student.phone, student.mentor]
@@ -405,7 +407,10 @@ function filteredStudents() {
 function archivedStudents() {
   if (!isAdmin()) return [];
   const term = searchTerm.trim().toLowerCase();
-  const students = state.students.filter((student) => student.status === "archived");
+  const students = filterStudentsByProgram(
+    state.students.filter((student) => student.status === "archived"),
+    studentsProgramFilter,
+  );
   if (!term) return students;
   return students.filter((student) =>
     [student.name, student.course, student.group, student.parent, student.phone, student.mentor]
@@ -413,6 +418,24 @@ function archivedStudents() {
       .toLowerCase()
       .includes(term),
   );
+}
+
+function filterStudentsByProgram(students, track = "all") {
+  if (track === "A" || track === "B") {
+    return students.filter((student) => programTrack(student) === track);
+  }
+  return students;
+}
+
+function programFilterSelect(id, selected) {
+  return `
+    <label class="inline-filter">Программа
+      <select id="${id}">
+        <option value="all" ${selected === "all" ? "selected" : ""}>A и B</option>
+        <option value="A" ${selected === "A" ? "selected" : ""}>Программа A</option>
+        <option value="B" ${selected === "B" ? "selected" : ""}>Программа B</option>
+      </select>
+    </label>`;
 }
 
 function formatMoney(value) {
@@ -1969,8 +1992,9 @@ function renderStudents() {
         ${isAdmin() ? `<button class="button primary" data-add-student type="button">+ Ученик</button>` : ""}
         ${isAdmin() ? `<button class="button secondary" data-download-student-badges type="button">PDF бейджи</button>` : ""}
         ${isAdmin() ? `<button class="button ghost" data-reset-demo type="button">Сброс демо</button>` : ""}
+        ${programFilterSelect("studentsProgramFilter", studentsProgramFilter)}
       </div>
-      <span class="badge neutral">${students.length} записей</span>
+      <span class="badge neutral">${students.length} записей${studentsProgramFilter !== "all" ? ` · ${programTitle(studentsProgramFilter)}` : ""}</span>
     </div>
     <article class="card">
       <div class="table-wrap">
@@ -2082,9 +2106,10 @@ function renderStudents() {
 }
 
 function renderAttendance() {
-  const groups = uniqueGroups();
+  const programStudents = filterStudentsByProgram(visibleStudents(), attendanceProgramFilter);
+  const groups = [...new Set(programStudents.map((student) => student.group))].sort();
   if (attendanceGroup !== "all" && !groups.includes(attendanceGroup)) attendanceGroup = "all";
-  const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
+  const students = programStudents.filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
   const records = visibleAttendance();
   const weekRange = currentWeekRange();
   const weeklyCounts = new Map(students.map((student) => [Number(student.id), studentWeeklyPresentCount(student.id, weekRange)]));
@@ -2100,6 +2125,7 @@ function renderAttendance() {
         ${isAdmin() ? `<button class="button secondary" data-open-mentor-journal type="button">Журнал ментора</button>` : ""}
         <button class="button secondary" data-print-attendance type="button">Печать ведомости</button>
         <button class="button ghost" data-export-attendance type="button">Экспорт CSV</button>
+        ${programFilterSelect("attendanceProgramFilter", attendanceProgramFilter)}
         <label class="inline-filter">Группа
           <select id="attendanceGroupFilter">
             <option value="all">Все доступные</option>
@@ -2115,7 +2141,7 @@ function renderAttendance() {
       ${stat("Письмо", students.filter((student) => subscriptionStatus(student).needsDirectorLetter).length, "3+ НБ")}
       ${stat("Эта неделя", weeklyTotal, `${formatDate(weekRange.start)} - ${formatDate(weekRange.end)}`)}
       ${stat("Были", weeklyActive, "учеников на этой неделе")}
-      ${stat("Учеников", students.length, attendanceGroup === "all" ? "все доступные группы" : attendanceGroup)}
+      ${stat("Учеников", students.length, `${attendanceProgramFilter === "all" ? "A и B" : programTitle(attendanceProgramFilter)} · ${attendanceGroup === "all" ? "все группы" : attendanceGroup}`)}
     </div>
     <article class="card">
       <div class="card-header">
@@ -3719,6 +3745,15 @@ function bindViewActions() {
   document.querySelector("[data-export-payments]")?.addEventListener("click", exportPaymentsCsv);
   document.querySelector("#attendanceGroupFilter")?.addEventListener("change", (event) => {
     attendanceGroup = event.target.value;
+    render();
+  });
+  document.querySelector("#studentsProgramFilter")?.addEventListener("change", (event) => {
+    studentsProgramFilter = event.target.value;
+    render();
+  });
+  document.querySelector("#attendanceProgramFilter")?.addEventListener("change", (event) => {
+    attendanceProgramFilter = event.target.value;
+    attendanceGroup = "all";
     render();
   });
   document.querySelector("[data-reset-demo]")?.addEventListener("click", () => {
@@ -6725,8 +6760,8 @@ function openCertificatePreview(certificateId) {
 }
 
 function printAttendanceSheet() {
-  const students = visibleStudents().filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
-  const title = attendanceGroup === "all" ? "Все доступные группы" : attendanceGroup;
+  const students = filterStudentsByProgram(visibleStudents(), attendanceProgramFilter).filter((student) => attendanceGroup === "all" || student.group === attendanceGroup);
+  const title = `${attendanceProgramFilter === "all" ? "A и B" : programTitle(attendanceProgramFilter)} · ${attendanceGroup === "all" ? "Все доступные группы" : attendanceGroup}`;
   const rows = students
     .map((student, index) => {
       const sub = subscriptionStatus(student);
@@ -6764,13 +6799,7 @@ function openMentorJournalModal() {
       <label>Ментор<select name="mentor" required>${mentorOptions()}</select></label>
       <label>С даты<input name="from" type="date" required value="${isoDate(nextMonthStart)}" /></label>
       <label>По дату<input name="to" type="date" required value="${isoDate(nextMonthEnd)}" /></label>
-      <label>Формат
-        <select name="mode">
-          <option value="group">Страницы по группам</option>
-          <option value="compact">Компактный общий список</option>
-        </select>
-      </label>
-      <div class="form-note" style="grid-column:1/-1">CRM возьмет активных учеников выбранного ментора, его расписание за период и соберет альбомный журнал для печати или сохранения в PDF.</div>
+      <div class="form-note" style="grid-column:1/-1">CRM соберет официальный журнал: обложка, таблицы посещаемости по дням, листы фидбека и финальная страница с QR на сайт.</div>
       <div class="form-actions">
         <button class="button ghost" data-close-modal type="button">Отмена</button>
         <button class="button primary" type="submit">Сформировать журнал</button>
@@ -6829,16 +6858,17 @@ function journalLessonsForGroup(mentor, group, from, to) {
   });
 }
 
-function printMentorJournal({ mentor, from, to, mode }) {
+function printMentorJournal({ mentor, from, to }) {
   const mentorStudents = state.students
     .filter((student) => student.status !== "archived" && student.mentor === mentor)
     .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
   const groups = [...new Set(mentorStudents.map((student) => student.group))].sort();
-  const pages = groups.map((group) => {
-    const students = mentorStudents.filter((student) => student.group === group);
-    const lessons = journalLessonsForGroup(mentor, group, from, to);
-    return { group, students, lessons };
-  });
+  const dates = journalDateRange(from, to);
+  const pages = groups.map((group) => ({
+    group,
+    students: mentorStudents.filter((student) => student.group === group),
+    lessons: journalLessonsForGroup(mentor, group, from, to),
+  }));
   const totalLessons = pages.reduce((sum, page) => sum + page.lessons.length, 0);
   const win = window.open("", "_blank", "width=1200,height=800");
   if (!win) return;
@@ -6850,48 +6880,58 @@ function printMentorJournal({ mentor, from, to, mode }) {
           @page { size: A4 landscape; margin: 9mm; }
           * { box-sizing: border-box; }
           body { margin: 0; color: #10233f; font-family: Arial, sans-serif; background: #fff; }
-          .journal-cover, .journal-page { page-break-after: always; padding: 0; }
-          .journal-cover { min-height: 185mm; display: grid; grid-template-columns: 1.35fr .65fr; gap: 18px; align-items: stretch; }
-          .cover-main { border: 2px solid #1d6fe8; border-radius: 18px; padding: 22px; background: linear-gradient(135deg,#f7fbff,#eef6ff); }
-          .cover-main h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: 0; }
-          .cover-main p { margin: 0; color: #5f6f84; font-size: 14px; }
-          .cover-meta { display: grid; gap: 10px; margin-top: 22px; grid-template-columns: repeat(2,1fr); }
-          .cover-meta div, .cover-side div { border: 1px solid #cfdceb; border-radius: 12px; padding: 12px; background: #fff; }
-          .cover-meta strong, .cover-side strong { display: block; font-size: 20px; }
-          .cover-meta small, .cover-side small { color: #5f6f84; }
+          .journal-page { min-height: 190mm; page-break-after: always; position: relative; }
+          .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
+          .page-head h2 { margin: 0; font-size: 20px; letter-spacing: 0; }
+          .page-head p { margin: 3px 0 0; color: #5f6f84; font-size: 11px; }
+          .badge { display: inline-block; border: 1px solid #cfdceb; border-radius: 999px; padding: 5px 9px; color: #1d6fe8; background: #eef6ff; font-weight: 700; font-size: 11px; white-space: nowrap; }
+          .cover { display: grid; grid-template-columns: 1.25fr .75fr; gap: 18px; align-items: stretch; }
+          .cover-main { border: 2px solid #1d6fe8; border-radius: 20px; padding: 24px; background: linear-gradient(135deg, #f7fbff, #eef6ff); }
+          .cover-mark { width: 78px; height: 78px; object-fit: contain; margin-bottom: 18px; }
+          .cover-main h1 { margin: 0 0 12px; font-size: 34px; line-height: 1.05; }
+          .cover-main h1 span { display: block; color: #1d6fe8; }
+          .cover-main p { margin: 0; color: #5f6f84; font-size: 14px; max-width: 620px; }
+          .official-line { margin-top: 28px; padding-top: 18px; border-top: 1px solid #cfdceb; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+          .official-line div, .cover-side div, .sign-box { border: 1px solid #cfdceb; border-radius: 14px; padding: 12px; background: #fff; }
+          .official-line small, .cover-side small, .sign-box small { display: block; color: #5f6f84; margin-bottom: 4px; }
+          .official-line strong, .cover-side strong { display: block; font-size: 22px; }
           .cover-side { display: grid; gap: 10px; align-content: start; }
-          .journal-page h2 { margin: 0; font-size: 22px; }
-          .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:10px; }
-          .page-head p { margin: 3px 0 0; color:#5f6f84; font-size:12px; }
-          .badge { display:inline-block; border:1px solid #cfdceb; border-radius:999px; padding:5px 9px; color:#1d6fe8; background:#eef6ff; font-weight:700; font-size:11px; }
-          table { width:100%; border-collapse:collapse; table-layout:fixed; }
-          th, td { border:1px solid #b9c9dc; padding:5px 6px; vertical-align:top; font-size:10.5px; }
-          th { background:#eef6ff; text-align:left; color:#23466f; }
-          .students th:nth-child(1), .students td:nth-child(1) { width: 28px; text-align:center; }
-          .students th:nth-child(2), .students td:nth-child(2) { width: 24%; }
-          .students th:nth-child(3), .students td:nth-child(3) { width: 9%; text-align:center; }
-          .students th:nth-child(4), .students td:nth-child(4) { width: 12%; }
-          .students th:nth-child(5), .students td:nth-child(5) { width: 12%; }
-          .students th:nth-child(6), .students td:nth-child(6) { width: 18%; }
-          .students th:nth-child(7), .students td:nth-child(7) { width: auto; }
-          .mark-box { height: 20px; border:1px dashed #90a8c2; border-radius:5px; margin-top:3px; }
-          .lesson-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px; }
-          .lesson-card { break-inside:avoid; border:1px solid #b9c9dc; border-radius:10px; padding:8px; min-height:72px; }
-          .lesson-card strong { display:block; margin-bottom:5px; }
-          .line { border-bottom:1px solid #b9c9dc; height:16px; margin-top:4px; }
-          .summary { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:10px; }
-          .summary div { border:1px solid #b9c9dc; border-radius:10px; padding:8px; min-height:48px; }
-          .compact-page .journal-page { page-break-after:auto; }
-          @media print { .journal-page:last-child { page-break-after:auto; } }
+          .signature { height: 30px; border-bottom: 1px solid #90a8c2; margin-top: 12px; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { border: 1px solid #b9c9dc; padding: 5px 5px; vertical-align: middle; font-size: 9.5px; }
+          th { background: #eef6ff; color: #23466f; text-align: center; }
+          td { text-align: center; }
+          .name-cell { text-align: left; width: 190px; }
+          .name-cell strong, .feedback-name strong { display: block; font-size: 10.5px; }
+          .name-cell small, .feedback-name small { color: #5f6f84; }
+          .day-col { width: ${Math.max(22, Math.min(46, Math.floor(760 / Math.max(1, dates.length))))}px; }
+          .mark-cell { height: 25px; }
+          .journal-note { margin-top: 8px; color: #5f6f84; font-size: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
+          .feedback-grid { display: grid; gap: 8px; }
+          .feedback-row { display: grid; grid-template-columns: 190px 1fr 1fr 1fr; gap: 0; border: 1px solid #b9c9dc; border-radius: 10px; overflow: hidden; break-inside: avoid; }
+          .feedback-row > div { min-height: 54px; padding: 7px; border-right: 1px solid #b9c9dc; font-size: 10px; }
+          .feedback-row > div:last-child { border-right: 0; }
+          .feedback-head { display: grid; grid-template-columns: 190px 1fr 1fr 1fr; margin-bottom: 5px; color: #23466f; font-size: 10px; font-weight: 700; }
+          .final-grid { display: grid; grid-template-columns: 1fr 230px; gap: 18px; align-items: start; }
+          .final-panel { border: 1px solid #cfdceb; border-radius: 16px; padding: 14px; min-height: 64px; }
+          .final-panel h3 { margin: 0 0 8px; font-size: 15px; }
+          .line { border-bottom: 1px solid #90a8c2; height: 18px; }
+          .qr-box { text-align: center; border: 2px solid #1d6fe8; border-radius: 18px; padding: 14px; }
+          .qr-box img { width: 170px; height: 170px; display: block; margin: 0 auto 8px; }
+          .footer-sign { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+          @media print { .journal-page:last-child { page-break-after: auto; } }
         </style>
       </head>
-      <body class="${mode === "compact" ? "compact-page" : ""}">
+      <body>
         ${mentorJournalCover(mentor, from, to, pages, totalLessons)}
         ${
           pages.length
-            ? pages.map((page, index) => mentorJournalPage(page, mentor, from, to, index + 1, pages.length)).join("")
+            ? pages
+                .flatMap((page) => [mentorJournalAttendancePage(page, mentor, dates), mentorJournalFeedbackPage(page, mentor, from, to)])
+                .join("")
             : `<section class="journal-page"><div class="page-head"><div><h2>Нет учеников</h2><p>У ментора ${escapeHtml(mentor)} нет активных учеников в CRM.</p></div></div></section>`
         }
+        ${mentorJournalFinalPage(mentor, from, to, pages, totalLessons)}
       </body>
     </html>
   `);
@@ -6900,52 +6940,91 @@ function printMentorJournal({ mentor, from, to, mode }) {
   setTimeout(() => win.print(), 250);
 }
 
+function journalMonthYear(from, to) {
+  const start = new Date(from);
+  const end = new Date(to);
+  const formatter = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" });
+  const startLabel = formatter.format(start);
+  const endLabel = formatter.format(end);
+  return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+}
+
+function journalDateHeader(date) {
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(new Date(date));
+}
+
 function mentorJournalCover(mentor, from, to, pages, totalLessons) {
   const studentCount = pages.reduce((sum, page) => sum + page.students.length, 0);
   return `
-    <section class="journal-cover">
+    <section class="journal-page cover">
       <div class="cover-main">
-        <h1>S7 Robotics · бумажный журнал</h1>
-        <p>Журнал посещаемости, темы уроков, фидбека родителям и итогового отчета ментора.</p>
-        <div class="cover-meta">
+        <img class="cover-mark" src="assets/logo.svg" alt="S7 Robotics" />
+        <h1>Журнал ментора <span>S7 Robotics</span></h1>
+        <p>Официальный бумажный журнал посещаемости, фидбека, контроля уроков и итоговой отчетности образовательного центра.</p>
+        <div class="official-line">
+          <div><small>Месяц / период</small><strong>${escapeHtml(journalMonthYear(from, to))}</strong></div>
           <div><small>Ментор</small><strong>${escapeHtml(mentor)}</strong></div>
-          <div><small>Период</small><strong>${formatDate(from)} - ${formatDate(to)}</strong></div>
-          <div><small>Групп</small><strong>${pages.length}</strong></div>
-          <div><small>Учеников</small><strong>${studentCount}</strong></div>
+          <div><small>Группы</small><strong>${pages.map((page) => escapeHtml(page.group)).join(", ") || "нет"}</strong></div>
+          <div><small>Ученики / уроки</small><strong>${studentCount} / ${totalLessons}</strong></div>
         </div>
       </div>
       <aside class="cover-side">
-        <div><small>Плановых уроков</small><strong>${totalLessons}</strong></div>
-        <div><small>Правила отметок</small><p>Б = был, НБ = не был, О = опоздал. Фидбек заполняется коротко после урока.</p></div>
-        <div><small>Подпись администратора</small><p>________________________</p></div>
+        <div><small>Дата выдачи журнала</small><strong>${formatDate(isoDate(new Date()))}</strong></div>
+        <div><small>Период занятий</small><strong>${formatDate(from)} - ${formatDate(to)}</strong></div>
+        <div><small>Подпись администратора</small><div class="signature"></div></div>
+        <div><small>Печать / отметка центра</small><div class="signature"></div></div>
       </aside>
     </section>`;
 }
 
-function mentorJournalPage(page, mentor, from, to, pageNumber, totalPages) {
+function mentorJournalAttendancePage(page, mentor, dates) {
+  const dayHeaders = dates.map((date) => `<th class="day-col">${journalDateHeader(date)}</th>`).join("");
   const rows = page.students
     .map((student, index) => {
       const sub = subscriptionStatus(student);
       return `
         <tr>
           <td>${index + 1}</td>
-          <td><strong>${escapeHtml(student.name)}</strong><br><small>${escapeHtml(student.parent)} · ${escapeHtml(student.phone)}</small></td>
-          <td>${sub.visitLabel}<div class="mark-box"></div></td>
-          <td><div class="mark-box"></div><small>Б / НБ / О</small></td>
-          <td><div class="mark-box"></div><small>балл / XP</small></td>
-          <td><div class="line"></div><div class="line"></div></td>
-          <td><div class="line"></div><div class="line"></div></td>
+          <td class="name-cell"><strong>${escapeHtml(student.name)}</strong><small>${escapeHtml(student.parent)} · ${sub.visitLabel}</small></td>
+          ${dates.map(() => `<td class="mark-cell"></td>`).join("")}
+          <td></td>
         </tr>`;
     })
     .join("");
-  const lessonCards = (page.lessons.length ? page.lessons : [{ date: from, day: "", time: "", topic: "" }])
+  const lessonHints = page.lessons
+    .map((lesson) => `${journalDateHeader(lesson.date)} ${lesson.time || ""}`)
+    .join(" · ");
+  return `
+    <section class="journal-page">
+      <div class="page-head">
+        <div>
+          <h2>Посещаемость · ${escapeHtml(page.group)}</h2>
+          <p>${escapeHtml(mentor)} · отметки по дням выбранного периода</p>
+        </div>
+        <span class="badge">${page.students.length} учеников · ${dates.length} дней</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th style="width:28px">№</th><th class="name-cell">Ученик</th>${dayHeaders}<th style="width:70px">Итого</th></tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="${dates.length + 3}">В группе нет активных учеников</td></tr>`}</tbody>
+      </table>
+      <div class="journal-note">
+        <span>Б = был</span><span>НБ = не был</span><span>О = опоздал</span><span>У = уважительная причина</span>
+        ${lessonHints ? `<span>Уроки по расписанию: ${escapeHtml(lessonHints)}</span>` : `<span>Расписание группы не найдено, таблица создана по всем дням периода.</span>`}
+      </div>
+    </section>`;
+}
+
+function mentorJournalFeedbackPage(page, mentor, from, to) {
+  const rows = page.students
     .map(
-      (lesson) => `
-        <div class="lesson-card">
-          <strong>${formatDate(lesson.date)} ${escapeHtml(lesson.day)} ${escapeHtml(lesson.time)}</strong>
-          <span>Тема урока:</span><div class="line"></div>
-          <span>Что отработали:</span><div class="line"></div>
-          <span>Домашка / рекомендация:</span><div class="line"></div>
+      (student) => `
+        <div class="feedback-row">
+          <div class="feedback-name"><strong>${escapeHtml(student.name)}</strong><small>${escapeHtml(student.group)} · ${escapeHtml(student.phone)}</small></div>
+          <div>Что получилось<div class="line"></div><div class="line"></div></div>
+          <div>Что подтянуть<div class="line"></div><div class="line"></div></div>
+          <div>Комментарий родителю<div class="line"></div><div class="line"></div></div>
         </div>`,
     )
     .join("");
@@ -6953,22 +7032,48 @@ function mentorJournalPage(page, mentor, from, to, pageNumber, totalPages) {
     <section class="journal-page">
       <div class="page-head">
         <div>
-          <h2>${escapeHtml(page.group)} · ${escapeHtml(mentor)}</h2>
-          <p>${formatDate(from)} - ${formatDate(to)} · страница ${pageNumber}/${totalPages}</p>
+          <h2>Фидбек и отчет · ${escapeHtml(page.group)}</h2>
+          <p>${escapeHtml(mentor)} · ${formatDate(from)} - ${formatDate(to)}</p>
         </div>
-        <span class="badge">${page.students.length} учеников · ${page.lessons.length} уроков</span>
+        <span class="badge">для переноса в CRM после уроков</span>
       </div>
-      <table class="students">
-        <thead>
-          <tr><th>№</th><th>Ученик</th><th>Абон.</th><th>Посещ.</th><th>Работа</th><th>Фидбек родителю</th><th>Комментарий ментора</th></tr>
-        </thead>
-        <tbody>${rows || `<tr><td colspan="7">В группе нет активных учеников</td></tr>`}</tbody>
-      </table>
-      <div class="lesson-grid">${lessonCards}</div>
-      <div class="summary">
-        <div><strong>Итог уроков / месяца</strong><div class="line"></div><div class="line"></div></div>
-        <div><strong>Кому нужен звонок</strong><div class="line"></div><div class="line"></div></div>
-        <div><strong>Подпись ментора</strong><div class="line"></div><div class="line"></div></div>
+      <div class="feedback-head"><span>Ученик</span><span>Что получилось</span><span>Что подтянуть</span><span>Комментарий родителю</span></div>
+      <div class="feedback-grid">${rows || `<div class="feedback-row"><div>Нет учеников</div><div></div><div></div><div></div></div>`}</div>
+      <div class="footer-sign">
+        <div class="sign-box"><small>Подпись ментора</small><div class="signature"></div></div>
+        <div class="sign-box"><small>Проверил администратор</small><div class="signature"></div></div>
+      </div>
+    </section>`;
+}
+
+function mentorJournalFinalPage(mentor, from, to, pages, totalLessons) {
+  const siteUrl = "https://s7robotics.space/";
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(siteUrl)}`;
+  const studentCount = pages.reduce((sum, page) => sum + page.students.length, 0);
+  return `
+    <section class="journal-page">
+      <div class="page-head">
+        <div>
+          <h2>Итоговый лист журнала</h2>
+          <p>${escapeHtml(mentor)} · ${formatDate(from)} - ${formatDate(to)}</p>
+        </div>
+        <span class="badge">S7 Robotics · официальный журнал</span>
+      </div>
+      <div class="final-grid">
+        <div>
+          <div class="final-panel"><h3>Сводка периода</h3><p>Групп: ${pages.length}. Учеников: ${studentCount}. Плановых уроков: ${totalLessons}.</p></div>
+          <div class="final-panel"><h3>Замечания администратора</h3><div class="line"></div><div class="line"></div><div class="line"></div></div>
+          <div class="final-panel"><h3>Итог ментора</h3><div class="line"></div><div class="line"></div><div class="line"></div></div>
+          <div class="footer-sign">
+            <div class="sign-box"><small>Подпись ментора</small><div class="signature"></div></div>
+            <div class="sign-box"><small>Подпись администратора</small><div class="signature"></div></div>
+          </div>
+        </div>
+        <aside class="qr-box">
+          <img src="${qrSrc}" alt="QR S7 Robotics" />
+          <strong>s7robotics.space</strong>
+          <p>Сканируйте QR для перехода в CRM S7 Robotics.</p>
+        </aside>
       </div>
     </section>`;
 }
